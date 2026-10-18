@@ -1,0 +1,48 @@
+plugins {
+    id 'com.android.application'
+}
+
+def runNumber = Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER") ?: "1")
+
+android {
+    namespace 'com.alexspec.specialist'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.alexspec.specialist'
+        minSdk 24
+        targetSdk 35
+        versionCode runNumber
+        versionName "1.0.${runNumber}"
+    }
+
+    signingConfigs {
+        emu {
+            storeFile file('emu.keystore')
+            storePassword 'specialist'
+            keyAlias 'emu'
+            keyPassword 'specialist'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.emu
+        }
+        debug {
+            signingConfig signingConfigs.emu
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+        encoding 'UTF-8'
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
