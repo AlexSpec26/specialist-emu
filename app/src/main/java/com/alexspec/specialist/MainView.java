@@ -71,6 +71,7 @@ final class MainView extends View {
     private final float[] btnY = new float[ControlConfig.MAX_BUTTONS];
     private float btnR;
     private boolean landscape;
+    private float insL, insT, insR, insB;
 
     private static final class VKey {
         final int code;
@@ -122,29 +123,22 @@ final class MainView extends View {
 
     // ------------------------------------------------------------------ keyboard layout
 
-    private void row(Object... items) {
-        List<VKey> r = new ArrayList<>();
-        for (int i = 0; i < items.length; i++) {
-            String label = (String) items[i];
-            float w = 1f;
-            if (i + 1 < items.length && items[i + 1] instanceof Float) {
-                w = (Float) items[++i];
-            }
-            int code = SpecKeys.byLabel(label);
-            if (code == SpecKeys.NONE) throw new IllegalStateException("no key " + label);
-            r.add(new VKey(code, w));
-        }
-        rows.add(r);
-    }
-
+    /**
+     * The original Specialist keyboard is a plain 12 x 6 grid that mirrors the scan matrix:
+     * physical rows top to bottom are matrix rows 5..0, keys left to right are columns 11..0.
+     * НР (Shift) is a separate key; it is placed at the left of the bottom row.
+     */
     private void buildKeyboard() {
-        row("F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "СТР");
-        row(";", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-");
-        row("Й", "Ц", "У", "К", "Е", "Н", "Г", "Ш", "Щ", "З", "Х", ":");
-        row("Ф", "Ы", "В", "А", "П", "Р", "О", "Л", "Д", "Ж", "Э", ".");
-        row("Я", "Ч", "С", "М", "И", "Т", "Ь", "Б", "Ю", ",", "/", "ЗБ");
-        row("НР", 1.5f, "Р/Л", 1.25f, "АР2", 1.25f, "ТАБ", 1.25f, "Пробел", 4.25f, "ВК", 2.5f);
-        row("ПС", "ПВ", "↖", "←", "↑", "↓", "→");
+        rows.clear();
+        for (int r = SpecKeys.ROWS - 1; r >= 0; r--) {
+            List<VKey> line = new ArrayList<>();
+            if (r == 0) line.add(new VKey(SpecKeys.SHIFT, 1f));
+            for (int c = SpecKeys.COLS - 1; c >= 0; c--) {
+                int code = SpecKeys.code(c, r);
+                line.add(new VKey(code, code == SpecKeys.SPACE ? 2f : 1f));
+            }
+            rows.add(line);
+        }
     }
 
     // ------------------------------------------------------------------ public API
@@ -206,51 +200,97 @@ final class MainView extends View {
     // ------------------------------------------------------------------ layout
 
     @Override
+    public android.view.WindowInsets onApplyWindowInsets(android.view.WindowInsets in) {
+        float l = 0, t = 0, r = 0, b = 0;
+        android.view.DisplayCutout cut = in.getDisplayCutout();
+        if (cut != null) {
+            l = cut.getSafeInsetLeft();
+            t = cut.getSafeInsetTop();
+            r = cut.getSafeInsetRight();
+            b = cut.getSafeInsetBottom();
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            float rad = 0;
+            int[] pos = {android.view.RoundedCorner.POSITION_TOP_LEFT, android.view.RoundedCorner.POSITION_TOP_RIGHT,
+                    android.view.RoundedCorner.POSITION_BOTTOM_LEFT, android.view.RoundedCorner.POSITION_BOTTOM_RIGHT};
+            for (int p : pos) {
+                android.view.RoundedCorner rc = in.getRoundedCorner(p);
+                if (rc != null) rad = Math.max(rad, rc.getRadius());
+            }
+            // a rectangle inset by r*(1-1/sqrt2) on both axes clears a corner of radius r
+            float m = rad * 0.3f;
+            l = Math.max(l, m);
+            t = Math.max(t, m);
+            r = Math.max(r, m);
+            b = Math.max(b, m);
+        } else {
+            float m = 12 * dp;
+            l = Math.max(l, m);
+            t = Math.max(t, m);
+            r = Math.max(r, m);
+            b = Math.max(b, m);
+        }
+        if (l != insL || t != insT || r != insR || b != insB) {
+            insL = l;
+            insT = t;
+            insR = r;
+            insB = b;
+            releaseAll();
+            layoutControls(getWidth(), getHeight());
+            invalidate();
+        }
+        return in;
+    }
+
+    @Override
     protected void onSizeChanged(int w, int h, int ow, int oh) {
         releaseAll();
         layoutControls(w, h);
     }
 
-    private void layoutControls(int w, int h) {
-        if (w == 0 || h == 0) return;
-        landscape = w > h;
+    private void layoutControls(int fullW, int fullH) {
+        if (fullW == 0 || fullH == 0) return;
+        final float ox = insL, oy = insT;
+        final float w = fullW - insL - insR, h = fullH - insT - insB;
+        landscape = fullW > fullH;
         float tb = 52 * dp;
         toolbarH = tb;
         float small = 46 * dp;
         if (!landscape) {
             float sh = w * (float) Specialist.HEIGHT / Specialist.WIDTH;
-            screenRect.set(0, 0, w, sh);
-            toolbarY = sh;
-            menuRect.set(8 * dp, sh + (tb - small) / 2, 8 * dp + small * 1.4f, sh + (tb + small) / 2);
-            kbdBtnRect.set(w - 8 * dp - small * 1.4f, menuRect.top, w - 8 * dp, menuRect.bottom);
-            float top = sh + tb;
-            float regionH = h - top;
-            joyZone.set(0, top, w / 2f, h);
-            btnZone.set(w / 2f, top, w, h);
+            screenRect.set(ox, oy, ox + w, oy + sh);
+            toolbarY = oy + sh;
+            menuRect.set(ox + 8 * dp, toolbarY + (tb - small) / 2, ox + 8 * dp + small * 1.4f, toolbarY + (tb + small) / 2);
+            kbdBtnRect.set(ox + w - 8 * dp - small * 1.4f, menuRect.top, ox + w - 8 * dp, menuRect.bottom);
+            float top = toolbarY + tb;
+            float bottom = oy + h;
+            float regionH = bottom - top;
+            joyZone.set(0, top, fullW / 2f, fullH);
+            btnZone.set(fullW / 2f, top, fullW, fullH);
             float cy = top + regionH * 0.5f;
-            joyCx = w * 0.27f;
+            joyCx = ox + w * 0.27f;
             joyCy = cy;
             joyR = Math.min(w * 0.21f, regionH * 0.32f);
-            layoutButtons(w * 0.73f, cy, Math.min(w * 0.2f, regionH * 0.3f));
-            float rowH = Math.min(regionH / rows.size(), 64 * dp);
-            kbdRect.set(0, h - rowH * rows.size() - 6 * dp, w, h);
+            layoutButtons(ox + w * 0.73f, cy, Math.min(w * 0.2f, regionH * 0.3f));
+            float rowH = Math.min(regionH / rows.size(), 60 * dp);
+            kbdRect.set(ox, bottom - rowH * rows.size() - 6 * dp, ox + w, bottom);
         } else {
-            float sw = Math.min(h * 1.5f, w * 0.66f);
+            float sw = Math.min(h * 1.5f, w * 0.64f);
             float sh = sw / 1.5f;
-            float sx = (w - sw) / 2f;
-            screenRect.set(sx, (h - sh) / 2f, sx + sw, (h + sh) / 2f);
+            float sx = ox + (w - sw) / 2f;
+            screenRect.set(sx, oy + (h - sh) / 2f, sx + sw, oy + (h + sh) / 2f);
             toolbarY = -1;
-            menuRect.set(10 * dp, 10 * dp, 10 * dp + small * 1.4f, 10 * dp + small);
-            kbdBtnRect.set(w - 10 * dp - small * 1.4f, 10 * dp, w - 10 * dp, 10 * dp + small);
-            joyZone.set(0, small + 16 * dp, sx, h);
-            btnZone.set(sx + sw, small + 16 * dp, w, h);
-            float side = sx;
-            joyCx = side / 2f;
-            joyCy = h * 0.62f;
+            menuRect.set(ox + 6 * dp, oy + 6 * dp, ox + 6 * dp + small * 1.4f, oy + 6 * dp + small);
+            kbdBtnRect.set(ox + w - 6 * dp - small * 1.4f, oy + 6 * dp, ox + w - 6 * dp, oy + 6 * dp + small);
+            joyZone.set(0, menuRect.bottom + 8 * dp, sx, fullH);
+            btnZone.set(sx + sw, menuRect.bottom + 8 * dp, fullW, fullH);
+            float side = sx - ox;
+            joyCx = ox + side / 2f;
+            joyCy = oy + h * 0.62f;
             joyR = Math.min(side * 0.42f, h * 0.26f);
-            layoutButtons(w - side / 2f, h * 0.62f, Math.min(side * 0.42f, h * 0.26f));
-            float kh = Math.min(h * 0.62f, rows.size() * 56 * dp);
-            kbdRect.set(0, h - kh, w, h);
+            layoutButtons(ox + w - side / 2f, oy + h * 0.62f, Math.min(side * 0.42f, h * 0.26f));
+            float kh = Math.min(h * 0.62f, rows.size() * 54 * dp);
+            kbdRect.set(ox, oy + h - kh, ox + w, oy + h);
         }
         knobX = joyCx;
         knobY = joyCy;
@@ -277,12 +317,18 @@ final class MainView extends View {
         float pad = 3 * dp;
         float top = kbdRect.top + 6 * dp;
         float rowH = (kbdRect.bottom - top) / rows.size();
+        float maxTotal = 0;
+        for (List<VKey> r : rows) {
+            float t = 0;
+            for (VKey k : r) t += k.weight;
+            maxTotal = Math.max(maxTotal, t);
+        }
+        float unit = (kbdRect.width() - 2 * pad) / maxTotal;
         for (int ri = 0; ri < rows.size(); ri++) {
             List<VKey> r = rows.get(ri);
             float total = 0;
             for (VKey k : r) total += k.weight;
-            float x = kbdRect.left + pad;
-            float unit = (kbdRect.width() - 2 * pad) / total;
+            float x = kbdRect.left + pad + (kbdRect.width() - 2 * pad - unit * total) / 2f;
             float y = top + ri * rowH;
             for (VKey k : r) {
                 float kw = unit * k.weight;
@@ -375,6 +421,11 @@ final class MainView extends View {
         c.drawText(a, x, y + text.getTextSize() * 0.36f, text);
     }
 
+    private static String keyCapLabel(int code) {
+        String l = SpecKeys.label(code);
+        return "Пробел".equals(l) ? "ПРОБЕЛ" : l;
+    }
+
     private static String shortLabel(int code) {
         if (code == SpecKeys.NONE) return "—";
         String l = SpecKeys.label(code);
@@ -404,19 +455,23 @@ final class MainView extends View {
                 else bg = 0xFF2A2A31;
                 fill.setColor(bg);
                 c.drawRoundRect(k.r, rad, rad, fill);
-                String main = SpecKeys.label(k.code);
+                String main = keyCapLabel(k.code);
                 String sec = SpecKeys.label2(k.code);
+                boolean letterish = main.length() == 1;
                 text.setColor(Color.WHITE);
-                float ts = Math.min(k.r.height() * 0.42f, 20 * dp);
+                float ts = Math.min(k.r.height() * (letterish ? 0.5f : 0.34f), (letterish ? 22 : 15) * dp);
                 text.setTextSize(ts);
                 float tw = text.measureText(main);
-                if (tw > k.r.width() * 0.86f) text.setTextSize(ts * k.r.width() * 0.86f / tw);
-                c.drawText(main, k.r.centerX(), k.r.centerY() + text.getTextSize() * 0.42f, text);
+                if (tw > k.r.width() * 0.84f) text.setTextSize(ts * k.r.width() * 0.84f / tw);
+                float cx = sec.isEmpty() ? k.r.centerX() : k.r.left + k.r.width() * 0.4f;
+                float cy = sec.isEmpty() ? k.r.centerY() + text.getTextSize() * 0.36f
+                        : k.r.top + k.r.height() * 0.48f + text.getTextSize() * 0.2f;
+                c.drawText(main, cx, cy, text);
                 if (!sec.isEmpty()) {
-                    text.setColor(0xFF9090A0);
-                    text.setTextSize(Math.min(k.r.height() * 0.26f, 12 * dp));
-                    text.setTextAlign(Paint.Align.LEFT);
-                    c.drawText(sec, k.r.left + 3 * dp, k.r.top + text.getTextSize() + 1 * dp, text);
+                    text.setColor(0xFFFF6A5A);
+                    text.setTextSize(Math.min(k.r.height() * 0.33f, 14 * dp));
+                    text.setTextAlign(Paint.Align.RIGHT);
+                    c.drawText(sec, k.r.right - 3 * dp, k.r.bottom - 4 * dp, text);
                     text.setTextAlign(Paint.Align.CENTER);
                 }
             }

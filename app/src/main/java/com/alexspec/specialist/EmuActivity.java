@@ -55,6 +55,14 @@ public final class EmuActivity extends Activity implements MainView.Host {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        // Draw edge to edge on every Android version; MainView keeps content clear of
+        // rounded corners and the camera hole using the window insets.
+        if (Build.VERSION.SDK_INT >= 28) {
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(lp);
+        }
+        if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
         prefs = getSharedPreferences("settings", MODE_PRIVATE);
 
         emu = new EmuThread(() -> {
@@ -639,7 +647,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
     private static int specForKey(KeyEvent ev) {
         int k = ev.getKeyCode();
         if (k >= KeyEvent.KEYCODE_A && k <= KeyEvent.KEYCODE_Z)
-            return SpecKeys.byLabel2(String.valueOf((char) ('A' + k - KeyEvent.KEYCODE_A)));
+            return SpecKeys.byLabel(String.valueOf((char) ('A' + k - KeyEvent.KEYCODE_A)));
         if (k >= KeyEvent.KEYCODE_0 && k <= KeyEvent.KEYCODE_9)
             return SpecKeys.byLabel(String.valueOf((char) ('0' + k - KeyEvent.KEYCODE_0)));
         if (k >= KeyEvent.KEYCODE_F1 && k <= KeyEvent.KEYCODE_F11)
@@ -664,12 +672,12 @@ public final class EmuActivity extends Activity implements MainView.Host {
             case KeyEvent.KEYCODE_MINUS: return SpecKeys.byLabel("-");
             case KeyEvent.KEYCODE_SEMICOLON: return SpecKeys.byLabel(";");
             case KeyEvent.KEYCODE_SLASH: return SpecKeys.byLabel("/");
-            case KeyEvent.KEYCODE_LEFT_BRACKET: return SpecKeys.byLabel2("[");
-            case KeyEvent.KEYCODE_RIGHT_BRACKET: return SpecKeys.byLabel2("]");
-            case KeyEvent.KEYCODE_BACKSLASH: return SpecKeys.byLabel2("\\");
+            case KeyEvent.KEYCODE_LEFT_BRACKET: return SpecKeys.byLabel("[");
+            case KeyEvent.KEYCODE_RIGHT_BRACKET: return SpecKeys.byLabel("]");
+            case KeyEvent.KEYCODE_BACKSLASH: return SpecKeys.byLabel("\\");
             case KeyEvent.KEYCODE_APOSTROPHE: return SpecKeys.byLabel(":");
-            case KeyEvent.KEYCODE_GRAVE: return SpecKeys.byLabel2("@");
-            case KeyEvent.KEYCODE_EQUALS: return SpecKeys.byLabel2("^");
+            case KeyEvent.KEYCODE_GRAVE: return SpecKeys.byLabel("@");
+            case KeyEvent.KEYCODE_EQUALS: return SpecKeys.byLabel("^");
             default: return SpecKeys.NONE;
         }
     }

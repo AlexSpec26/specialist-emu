@@ -13,36 +13,36 @@ public final class SpecKeys {
     public static final int COUNT = SHIFT + 1;
     public static final int NONE = -1;
 
-    /** Main label shown on the key (Cyrillic where the key has one). */
+    /** Main label shown on the key (Latin / symbol, as engraved on the original keycaps). */
     private static final String[][] LABEL = {
         {"ВК", "ЗБ", ".", ":", "-", "СТР"},
-        {"ПС", "/", "Э", "Х", "0", "F11"},
-        {"→", ",", "Ж", "З", "9", "F10"},
-        {"ПВ", "Ю", "Д", "Щ", "8", "F9"},
-        {"←", "Б", "Л", "Ш", "7", "F8"},
-        {"Пробел", "Ь", "О", "Г", "6", "F7"},
-        {"АР2", "Т", "Р", "Н", "5", "F6"},
-        {"ТАБ", "И", "П", "Е", "4", "F5"},
-        {"↓", "М", "А", "К", "3", "F4"},
-        {"↑", "С", "В", "У", "2", "F3"},
-        {"↖", "Ч", "Ы", "Ц", "1", "F2"},
-        {"Р/Л", "Я", "Ф", "Й", ";", "F1"},
+        {"ПС", "/", "\\", "H", "0", "F11"},
+        {"→", ",", "V", "Z", "9", "F10"},
+        {"ПВ", "@", "D", "]", "8", "F9"},
+        {"←", "B", "L", "[", "7", "F8"},
+        {"Пробел", "X", "O", "G", "6", "F7"},
+        {"АР2", "T", "R", "N", "5", "F6"},
+        {"ТАБ", "I", "P", "E", "4", "F5"},
+        {"↓", "M", "A", "K", "3", "F4"},
+        {"↑", "S", "W", "U", "2", "F3"},
+        {"↖", "^", "Y", "C", "1", "F2"},
+        {"Р/Л", "Q", "F", "J", ";", "F1"},
     };
 
-    /** Secondary (Latin / shifted) label, may be empty. */
+    /** Secondary label: Cyrillic letter or shifted symbol, may be empty. */
     private static final String[][] LABEL2 = {
         {"", "", ">", "*", "=", ""},
-        {"", "?", "\\", "H", "", ""},
-        {"", "<", "V", "Z", ")", ""},
-        {"", "@", "D", "]", "(", ""},
-        {"", "B", "L", "[", "'", ""},
-        {"", "X", "O", "G", "&", ""},
-        {"", "T", "R", "N", "%", ""},
-        {"", "I", "P", "E", "$", ""},
-        {"", "M", "A", "K", "#", ""},
-        {"", "S", "W", "U", "\"", ""},
-        {"", "^", "Y", "C", "!", ""},
-        {"", "Q", "F", "J", "+", ""},
+        {"", "?", "Э", "Х", "", ""},
+        {"", "<", "Ж", "З", ")", ""},
+        {"", "Ю", "Д", "Щ", "(", ""},
+        {"", "Б", "Л", "Ш", "'", ""},
+        {"", "Ь", "О", "Г", "&", ""},
+        {"", "Т", "Р", "Н", "%", ""},
+        {"", "И", "П", "Е", "$", ""},
+        {"", "М", "А", "К", "#", ""},
+        {"", "С", "В", "У", "\"", ""},
+        {"", "Ч", "Ы", "Ц", "!", ""},
+        {"", "Я", "Ф", "Й", "+", ""},
     };
 
     private SpecKeys() {
@@ -66,16 +66,16 @@ public final class SpecKeys {
     /** Human readable name for menus, e.g. "Й (J)". */
     public static String fullName(int code) {
         String l2 = label2(code);
-        return l2.isEmpty() ? label(code) : label(code) + "  " + l2;
+        return l2.isEmpty() ? label(code) : label(code) + " " + l2;
     }
 
-    /** Finds a key by its main label; returns NONE if absent. */
+    /** Finds a key by its main or secondary label; returns NONE if absent. */
     public static int byLabel(String label) {
         if ("НР".equals(label)) return SHIFT;
         for (int c = 0; c < COLS; c++)
             for (int r = 0; r < ROWS; r++)
                 if (LABEL[c][r].equals(label)) return code(c, r);
-        return NONE;
+        return byLabel2(label);
     }
 
     /** Finds a key by its secondary (Latin / shifted) label; returns NONE if absent. */
