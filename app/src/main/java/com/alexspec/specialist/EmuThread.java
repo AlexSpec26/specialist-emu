@@ -19,14 +19,17 @@ final class EmuThread extends Thread {
     final int[] frame = new int[Specialist.WIDTH * Specialist.HEIGHT];
 
     private final int[] back = new int[Specialist.WIDTH * Specialist.HEIGHT];
-    private final short[] audioBuf = new short[2048];
+    private final short[] audioBuf = new short[8192];
+    private final short[] outBuf = new short[2048];
     private final ConcurrentLinkedQueue<Runnable> queue = new ConcurrentLinkedQueue<>();
     private final Object lock = new Object();
     private final FrameListener listener;
 
     private volatile boolean running = true;
     private volatile boolean paused = true;
-    volatile boolean turbo;
+    private volatile boolean userPaused;
+    /** Emulation speed relative to the real machine, 0.2 .. 5. */
+    volatile float speed = 1f;
     volatile boolean sound = true;
     volatile int colorMode = Specialist.COLOR_WHITE;
 
@@ -49,6 +52,22 @@ final class EmuThread extends Thread {
             paused = p;
             lock.notifyAll();
         }
+    }
+
+    /** Pause requested by the user (menu open, screen tap); independent of activity lifecycle. */
+    void setUserPaused(boolean p) {
+        synchronized (lock) {
+            userPaused = p;
+            lock.notifyAll();
+        }
+    }
+
+    boolean isUserPaused() {
+        return userPaused;
+    }
+
+    private boolean isPaused() {
+        return paused || userPaused;
     }
 
     void quit() {
@@ -102,13 +121,13 @@ final class EmuThread extends Thread {
 
         while (running) {
             synchronized (lock) {
-                if (paused && running) {
+                if (isPaused() && running) {
                     if (track != null && playing) {
                         track.pause();
                         track.flush();
                         playing = false;
                     }
-                    while (paused && running && queue.isEmpty()) {
+                    while (isPaused() && running && queue.isEmpty()) {
                         try {
                             lock.wait();
                         } catch (InterruptedException ignored) {
@@ -118,7 +137,14 @@ final class EmuThread extends Thread {
             }
             drainQueue();
             if (!running) break;
-            if (paused) continue;
+            if (isPaused()) {
+                // a queued task (e.g. state load) may have changed the screen
+                if (machine.isRomLoaded()) {
+                    machine.render(back, colorMode);
+                    publish();
+                }
+                continue;
+            }
 
             if (!machine.isRomLoaded()) {
                 java.util.Arrays.fill(back, 0xFF000000);
@@ -128,20 +154,34 @@ final class EmuThread extends Thread {
                 continue;
             }
 
-            boolean fast = turbo;
-            int frames = fast ? 5 : 1;
-            int samples = 0;
-            for (int i = 0; i < frames; i++) samples = machine.runFrame(audioBuf);
+            float sp = Math.max(0.2f, Math.min(5f, speed));
+            int cycles = Math.round(Specialist.CYCLES_PER_FRAME * sp);
+            int samples = machine.run(audioBuf, cycles);
             machine.render(back, colorMode);
             publish();
 
-            boolean useAudio = sound && !fast && track != null;
+            boolean useAudio = sound && track != null;
             if (useAudio) {
                 if (!playing) {
                     track.play();
                     playing = true;
                 }
-                track.write(audioBuf, 0, samples); // blocking: paces emulation
+                // squeeze/stretch one emulated slice into one real 20 ms slice (pitch follows speed)
+                int outN = Specialist.SAMPLE_RATE / Specialist.FPS;
+                if (samples > 0) {
+                    for (int i = 0; i < outN; i++) {
+                        int a = (int) ((long) i * samples / outN);
+                        int b = Math.max(a + 1, (int) ((long) (i + 1) * samples / outN));
+                        if (a >= samples) a = samples - 1;
+                        if (b > samples) b = samples;
+                        int sum = 0;
+                        for (int k = a; k < b; k++) sum += audioBuf[k];
+                        outBuf[i] = (short) (sum / (b - a));
+                    }
+                } else {
+                    java.util.Arrays.fill(outBuf, 0, outN, (short) 0);
+                }
+                track.write(outBuf, 0, outN); // blocking: paces emulation
                 nextFrame = System.nanoTime();
             } else {
                 if (playing) {

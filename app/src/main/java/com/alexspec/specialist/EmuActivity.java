@@ -48,6 +48,8 @@ public final class EmuActivity extends Activity implements MainView.Host {
     private String program = "";
     private int pickSlot = -1;
     private final SparseIntArray physKeys = new SparseIntArray();
+    private int openDialogs;
+    private boolean tapPaused;
 
     // ------------------------------------------------------------------ lifecycle
 
@@ -193,10 +195,24 @@ public final class EmuActivity extends Activity implements MainView.Host {
     }
 
     private File stateFile() {
+        return stateFile(program);
+    }
+
+    /** Quick-save slot belonging to one program (by its file name); "" is the bare monitor. */
+    private File stateFile(String prog) {
         File d = new File(getFilesDir(), "states");
         //noinspection ResultOfMethodCallIgnored
         d.mkdirs();
-        return new File(d, (program.isEmpty() ? "_monitor" : program) + ".sav");
+        return new File(d, (prog.isEmpty() ? "_monitor" : prog) + ".sav");
+    }
+
+    private String progTitle() {
+        return program.isEmpty() ? "Монитор" : program;
+    }
+
+    private static String when(File f) {
+        return new java.text.SimpleDateFormat("d MMM, HH:mm", new java.util.Locale("ru"))
+                .format(new java.util.Date(f.lastModified()));
     }
 
     private static byte[] readAll(InputStream in) throws IOException {
@@ -250,7 +266,9 @@ public final class EmuActivity extends Activity implements MainView.Host {
         view.vibrate = prefs.getBoolean("vibrate", true);
         emu.colorMode = prefs.getInt("color", Specialist.COLOR_WHITE);
         emu.sound = prefs.getBoolean("sound", true);
-        emu.turbo = false;
+        float sp = prefs.getFloat("speed", 1f);
+        emu.speed = sp;
+        view.speed = sp;
         view.config = ControlConfig.load(prefs, program);
         view.title = program;
         machine.releaseAllKeys();
@@ -262,6 +280,38 @@ public final class EmuActivity extends Activity implements MainView.Host {
         view.config = ControlConfig.load(prefs, program);
         view.title = program;
         view.configChanged();
+    }
+
+    // ------------------------------------------------------------------ pause
+
+    /** Shows a dialog; emulation stays paused while any dialog is open. */
+    private AlertDialog show(AlertDialog.Builder b) {
+        AlertDialog d = b.create();
+        d.setOnDismissListener(x -> {
+            openDialogs--;
+            ui.post(this::updatePause); // a follow-up dialog may open from the click handler
+        });
+        openDialogs++;
+        updatePause();
+        d.show();
+        return d;
+    }
+
+    private void updatePause() {
+        boolean p = tapPaused || openDialogs > 0 || view.isPicking();
+        if (p) {
+            view.releaseAll();
+            machine.releaseAllKeys();
+        }
+        emu.setUserPaused(p);
+        view.paused = tapPaused || view.isPicking();
+        view.invalidate();
+    }
+
+    @Override
+    public void onScreenTapped() {
+        tapPaused = !tapPaused;
+        updatePause();
     }
 
     // ------------------------------------------------------------------ menu
@@ -276,15 +326,14 @@ public final class EmuActivity extends Activity implements MainView.Host {
         actions.add(this::showLibrary);
         items.add("🎮  Настроить кнопки…");
         actions.add(this::showMapping);
-        items.add("💾  Быстрое сохранение");
+        File st = stateFile();
+        items.add("💾  Сохранить: " + progTitle());
         actions.add(this::quickSave);
-        items.add("📥  Быстрая загрузка");
+        items.add(st.exists() ? "📥  Загрузить: " + progTitle() + " (" + when(st) + ")"
+                : "📥  Загрузить: " + progTitle() + " — нет сохранения");
         actions.add(this::quickLoad);
-        items.add(emu.turbo ? "⏩  Турбо: ВКЛ (выключить)" : "⏩  Турбо ×5");
-        actions.add(() -> {
-            emu.turbo = !emu.turbo;
-            toast(emu.turbo ? "Турбо включено" : "Турбо выключено");
-        });
+        items.add(String.format(java.util.Locale.US, "⏱  Скорость: %.1f×…", emu.speed));
+        actions.add(this::showSpeed);
         items.add("🔄  Перезапуск (сброс)");
         actions.add(() -> emu.post(() -> {
             machine.reset();
@@ -305,10 +354,59 @@ public final class EmuActivity extends Activity implements MainView.Host {
         items.add("❓  Справка");
         actions.add(this::showHelp);
 
-        new AlertDialog.Builder(this)
+        show(new AlertDialog.Builder(this)
                 .setTitle("Специалист")
                 .setItems(items.toArray(new String[0]), (d, which) -> actions.get(which).run())
-                .show();
+                );
+    }
+
+    private void showSpeed() {
+        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int pad = (int) (20 * getResources().getDisplayMetrics().density);
+        box.setPadding(pad, pad / 2, pad, 0);
+        android.widget.TextView label = new android.widget.TextView(this);
+        label.setTextSize(28);
+        label.setGravity(android.view.Gravity.CENTER);
+        android.widget.SeekBar bar = new android.widget.SeekBar(this);
+        bar.setMax(48); // 0.2 .. 5.0 in steps of 0.1
+        int pos = Math.round((emu.speed - 0.2f) * 10f);
+        bar.setProgress(Math.max(0, Math.min(48, pos)));
+        Runnable apply = () -> {
+            float v = Math.round((0.2f + bar.getProgress() * 0.1f) * 10f) / 10f;
+            emu.speed = v;
+            view.speed = v;
+            label.setText(String.format(java.util.Locale.US, "%.1f×", v));
+            prefs.edit().putFloat("speed", v).apply();
+            view.invalidate();
+        };
+        apply.run();
+        bar.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(android.widget.SeekBar sb, int p, boolean fromUser) {
+                apply.run();
+            }
+
+            @Override
+            public void onStartTrackingTouch(android.widget.SeekBar sb) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(android.widget.SeekBar sb) {
+            }
+        });
+        android.widget.TextView hint = new android.widget.TextView(this);
+        hint.setText("0.2× — замедление, 1× — как настоящий «Специалист», 5× — ускорение");
+        hint.setPadding(0, pad / 2, 0, 0);
+        box.addView(label);
+        box.addView(bar);
+        box.addView(hint);
+        AlertDialog d = show(new AlertDialog.Builder(this)
+                .setTitle("Скорость эмуляции")
+                .setView(box)
+                .setPositiveButton("Готово", null)
+                .setNeutralButton("1×", null));
+        d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> bar.setProgress(8));
     }
 
     @Override
@@ -317,7 +415,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
     }
 
     private void showHelp() {
-        new AlertDialog.Builder(this)
+        show(new AlertDialog.Builder(this)
                 .setTitle("Справка")
                 .setMessage("Запуск: после включения на запрос «PROGRAM ?» нажмите любую из клавиш F1–F11, "
                         + "затем ВК — откроется Монитор.\n\n"
@@ -326,9 +424,13 @@ public final class EmuActivity extends Activity implements MainView.Host {
                         + "Кнопки: меню → «Настроить кнопки». Для каждой программы раскладка запоминается отдельно.\n\n"
                         + "Клавиатура: кнопка ⌨. НР (Shift) нажимается один раз и действует на следующую клавишу. "
                         + "Р/Л переключает латиницу и кириллицу.\n\n"
+                        + "Пауза: нажмите на экран «Специалиста». Пока открыто меню, эмуляция тоже стоит.\n\n"
+                        + "Сохранения: у каждой программы своё. В «Моих программах» значок 💾 — "
+                        + "у программы есть сохранение, при запуске можно продолжить с него.\n\n"
+                        + "Скорость: меню → «Скорость», от 0.2× до 5×.\n\n"
                         + "Состояние машины сохраняется автоматически при выходе.")
                 .setPositiveButton("OK", null)
-                .show();
+                );
     }
 
     private void showSettings() {
@@ -341,13 +443,13 @@ public final class EmuActivity extends Activity implements MainView.Host {
             "Звук: " + (emu.sound ? "вкл" : "выкл"),
             "Вибрация: " + (view.vibrate ? "вкл" : "выкл"),
         };
-        new AlertDialog.Builder(this)
+        show(new AlertDialog.Builder(this)
                 .setTitle("Настройки")
                 .setItems(items, (d, which) -> {
                     switch (which) {
                         case 0: {
                             String[] counts = {"1", "2", "3", "4"};
-                            new AlertDialog.Builder(this)
+                            show(new AlertDialog.Builder(this)
                                     .setTitle("Кнопок справа")
                                     .setSingleChoiceItems(counts, view.buttonCount - 1, (d2, w) -> {
                                         prefs.edit().putInt("buttons", w + 1).apply();
@@ -355,14 +457,14 @@ public final class EmuActivity extends Activity implements MainView.Host {
                                         applySettings();
                                         showSettings();
                                     })
-                                    .show();
+                                    );
                             return;
                         }
                         case 1:
                             prefs.edit().putBoolean("joy8", !view.joy8).apply();
                             break;
                         case 2: {
-                            new AlertDialog.Builder(this)
+                            show(new AlertDialog.Builder(this)
                                     .setTitle("Цвет экрана")
                                     .setSingleChoiceItems(colorNames, color, (d2, w) -> {
                                         prefs.edit().putInt("color", w).apply();
@@ -370,7 +472,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
                                         applySettings();
                                         showSettings();
                                     })
-                                    .show();
+                                    );
                             return;
                         }
                         case 3:
@@ -383,8 +485,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
                     applySettings();
                     showSettings();
                 })
-                .setPositiveButton("Готово", null)
-                .show();
+                .setPositiveButton("Готово", null));
     }
 
     // ------------------------------------------------------------------ key mapping
@@ -415,6 +516,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
                     }
                     pickSlot = which;
                     view.startKeyPick("Нажмите клавишу для «" + ControlConfig.SLOT_NAMES[which] + "»");
+                    updatePause();
                 })
                 .setPositiveButton("Готово", null);
         if (!program.isEmpty()) {
@@ -423,7 +525,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
                 toast("Эта раскладка теперь используется по умолчанию");
             });
         }
-        b.show();
+        show(b);
     }
 
     @Override
@@ -434,6 +536,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
             pickSlot = -1;
             machine.releaseAllKeys();
             view.configChanged();
+            updatePause();
             showMapping();
         }
     }
@@ -441,6 +544,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
     @Override
     public void onPickCancelled() {
         pickSlot = -1;
+        updatePause();
         showMapping();
     }
 
@@ -474,38 +578,74 @@ public final class EmuActivity extends Activity implements MainView.Host {
     private void showLibrary() {
         File[] files = programsDir().listFiles();
         if (files == null || files.length == 0) {
-            new AlertDialog.Builder(this)
+            show(new AlertDialog.Builder(this)
                     .setTitle("Мои программы")
                     .setMessage("Пока пусто. Загрузите программу через меню — она появится здесь.")
                     .setPositiveButton("Загрузить…", (d, w) -> pickProgram())
                     .setNegativeButton("Закрыть", null)
-                    .show();
+                    );
             return;
         }
         Arrays.sort(files, (a, b) -> a.getName().compareToIgnoreCase(b.getName()));
         String[] names = new String[files.length];
-        for (int i = 0; i < files.length; i++) names[i] = files[i].getName();
-        new AlertDialog.Builder(this)
+        String[] shown = new String[files.length];
+        for (int i = 0; i < files.length; i++) {
+            names[i] = files[i].getName();
+            shown[i] = (stateFile(names[i]).exists() ? "💾 " : "      ") + names[i];
+        }
+        show(new AlertDialog.Builder(this)
                 .setTitle("Мои программы")
-                .setItems(names, (d, which) -> {
+                .setItems(shown, (d, which) -> {
                     if (!machine.isRomLoaded()) {
                         askForRom();
                         return;
                     }
-                    try {
-                        runProgram(names[which], readFile(files[which]));
-                    } catch (IOException e) {
-                        toast(e.getMessage());
-                    }
+                    launchFromLibrary(names[which], files[which]);
                 })
                 .setNeutralButton("Удалить…", (d, w) -> deletePrograms(files, names))
                 .setNegativeButton("Закрыть", null)
-                .show();
+                );
+    }
+
+    private void launchFromLibrary(String name, File file) {
+        File st = stateFile(name);
+        if (!st.exists()) {
+            try {
+                runProgram(name, readFile(file));
+            } catch (IOException e) {
+                toast(e.getMessage());
+            }
+            return;
+        }
+        show(new AlertDialog.Builder(this)
+                .setTitle(name)
+                .setItems(new String[]{"▶  Продолжить с сохранения (" + when(st) + ")", "⟲  Начать заново"}, (d, w) -> {
+                    try {
+                        if (w == 0) {
+                            byte[] data = readFile(st);
+                            emu.post(() -> {
+                                try {
+                                    machine.loadState(data);
+                                    ui.post(() -> {
+                                        setProgram(name);
+                                        toast("Продолжаем: " + name);
+                                    });
+                                } catch (IOException e) {
+                                    ui.post(() -> toast("Ошибка: " + e.getMessage()));
+                                }
+                            });
+                        } else {
+                            runProgram(name, readFile(file));
+                        }
+                    } catch (IOException e) {
+                        toast(e.getMessage());
+                    }
+                }));
     }
 
     private void deletePrograms(File[] files, String[] names) {
         boolean[] checked = new boolean[files.length];
-        new AlertDialog.Builder(this)
+        show(new AlertDialog.Builder(this)
                 .setTitle("Удалить программы")
                 .setMultiChoiceItems(names, checked, (d, w, c) -> checked[w] = c)
                 .setPositiveButton("Удалить", (d, w) -> {
@@ -513,22 +653,25 @@ public final class EmuActivity extends Activity implements MainView.Host {
                     for (int i = 0; i < files.length; i++) {
                         if (checked[i] && files[i].delete()) {
                             ControlConfig.remove(prefs, names[i]);
+                            //noinspection ResultOfMethodCallIgnored
+                            stateFile(names[i]).delete();
                             n++;
                         }
                     }
                     toast("Удалено: " + n);
                 })
                 .setNegativeButton("Отмена", null)
-                .show();
+                );
     }
 
     private void quickSave() {
         if (!machine.isRomLoaded()) return;
         final File f = stateFile();
+        final String name = progTitle();
         emu.post(() -> {
             try {
                 writeFile(f, machine.saveState());
-                ui.post(() -> toast("Сохранено"));
+                ui.post(() -> toast("Сохранено: " + name));
             } catch (IOException e) {
                 ui.post(() -> toast("Ошибка: " + e.getMessage()));
             }
@@ -538,7 +681,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
     private void quickLoad() {
         File f = stateFile();
         if (!f.exists()) {
-            toast("Сохранения пока нет");
+            toast("Для «" + progTitle() + "» сохранения пока нет");
             return;
         }
         try {
@@ -546,7 +689,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
             emu.post(() -> {
                 try {
                     machine.loadState(data);
-                    ui.post(() -> toast("Загружено"));
+                    ui.post(() -> toast("Загружено: " + progTitle()));
                 } catch (IOException e) {
                     ui.post(() -> toast("Ошибка: " + e.getMessage()));
                 }
@@ -559,13 +702,13 @@ public final class EmuActivity extends Activity implements MainView.Host {
     // ------------------------------------------------------------------ ROM
 
     private void askForRom() {
-        new AlertDialog.Builder(this)
+        show(new AlertDialog.Builder(this)
                 .setTitle("Нужно ПЗУ")
                 .setMessage("Выберите файл ПЗУ монитора «Специалиста» (обычно 2–12 КБ, например spec_m2.rom). "
                         + "Если ПЗУ состоит из нескольких файлов, выберите их все сразу — они склеятся по порядку имён.")
                 .setPositiveButton("Выбрать файл", (d, w) -> pickRom())
                 .setNegativeButton("Позже", null)
-                .show();
+                );
     }
 
     private void pickRom() {

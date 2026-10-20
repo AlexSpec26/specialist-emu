@@ -254,9 +254,14 @@ public final class Specialist implements Bus {
      * {@code audio} if not null; returns the number of samples produced.
      */
     public int runFrame(short[] audio) {
+        return run(audio, CYCLES_PER_FRAME);
+    }
+
+    /** Runs {@code cycles} CPU cycles, writing audio samples to {@code audio}; returns sample count. */
+    public int run(short[] audio, int cycles) {
         audioOut = audio;
         audioPos = 0;
-        runCycles(CYCLES_PER_FRAME);
+        runCycles(cycles);
         audioOut = null;
         return audioPos;
     }

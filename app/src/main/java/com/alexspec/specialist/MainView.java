@@ -26,6 +26,8 @@ final class MainView extends View {
     interface Host {
         void onMenuRequested();
 
+        void onScreenTapped();
+
         void onKeyboardToggled(boolean visible);
 
         void onKeyPicked(int code);
@@ -38,6 +40,7 @@ final class MainView extends View {
     private static final int T_MENU = -3;
     private static final int T_KBD = -4;
     private static final int T_CONSUMED = -5;
+    private static final int T_SCREEN = -6;
     private static final int T_BUTTON = 1000;
     private static final int T_KEY = 2000;
 
@@ -54,6 +57,9 @@ final class MainView extends View {
     boolean joy8;
     boolean vibrate = true;
     String title = "";
+    /** Shown as an overlay; the emulation itself is paused by the activity. */
+    boolean paused;
+    float speed = 1f;
 
     private boolean keyboardVisible;
     private String pickPrompt; // non-null while choosing a key for a control
@@ -348,6 +354,28 @@ final class MainView extends View {
         }
         screenBmp.setPixels(pixels, 0, Specialist.WIDTH, 0, 0, Specialist.WIDTH, Specialist.HEIGHT);
         c.drawBitmap(screenBmp, srcRect, screenRect, bmpPaint);
+        if (paused && machine.isRomLoaded()) {
+            fill.setColor(0x99000000);
+            c.drawRect(screenRect, fill);
+            text.setColor(Color.WHITE);
+            text.setTextSize(Math.min(screenRect.height() * 0.14f, 40 * dp));
+            c.drawText("❚❚  ПАУЗА", screenRect.centerX(), screenRect.centerY(), text);
+            text.setTextSize(Math.min(screenRect.height() * 0.06f, 15 * dp));
+            text.setColor(0xFFBBBBC5);
+            c.drawText("нажмите на экран, чтобы продолжить", screenRect.centerX(),
+                    screenRect.centerY() + screenRect.height() * 0.12f, text);
+        }
+        if (Math.abs(speed - 1f) > 0.01f) {
+            String sp = String.format(java.util.Locale.US, "%.1f×", speed);
+            text.setTextSize(13 * dp);
+            float tw = text.measureText(sp) + 12 * dp;
+            fill.setColor(0xCC3A5BD9);
+            RectF b = new RectF(screenRect.right - tw - 6 * dp, screenRect.top + 6 * dp,
+                    screenRect.right - 6 * dp, screenRect.top + 26 * dp);
+            c.drawRoundRect(b, 8 * dp, 8 * dp, fill);
+            text.setColor(Color.WHITE);
+            c.drawText(sp, b.centerX(), b.centerY() + 5 * dp, text);
+        }
 
         if (!machine.isRomLoaded()) {
             text.setTextSize(18 * dp);
@@ -483,6 +511,7 @@ final class MainView extends View {
     private int hitTest(float x, float y) {
         if (inflate(menuRect, 8 * dp).contains(x, y)) return T_MENU;
         if (inflate(kbdBtnRect, 8 * dp).contains(x, y)) return T_KBD;
+        if (screenRect.contains(x, y) && !(keyboardVisible && kbdRect.contains(x, y))) return T_SCREEN;
         if (keyboardVisible) {
             if (kbdRect.contains(x, y)) {
                 VKey best = null;
@@ -584,7 +613,7 @@ final class MainView extends View {
     }
 
     private void press(int id, int t, float x, float y) {
-        if (t == T_MENU || t == T_KBD) {
+        if (t == T_MENU || t == T_KBD || t == T_SCREEN) {
             haptic();
             return;
         }
@@ -633,6 +662,10 @@ final class MainView extends View {
     }
 
     private void release(int id, int t) {
+        if (t == T_SCREEN) {
+            if (pickPrompt == null) host.onScreenTapped();
+            return;
+        }
         if (t == T_MENU) {
             host.onMenuRequested();
             return;
