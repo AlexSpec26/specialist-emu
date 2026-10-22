@@ -76,7 +76,94 @@ static const char* KEY_NAME[SPEC_COLS][SPEC_ROWS] = {
     {"Up", "S", "W", "U", "2", "F3"},   {"HM", "^", "Y", "C", "1", "F2"},  {"R/L", "Q", "F", "J", ";", "F1"},
 };
 
+/* 2-character key caps for the compact keyboard (\x01..\x05 = arrows / home glyphs) */
+static const char* KEY_CAP[SPEC_COLS][SPEC_ROWS] = {
+    {"VK", "ZB", ".", ":", "-", "ST"},   {"PS", "/", "\\", "H", "0", "11"}, {"\x04", ",", "V", "Z", "9", "10"},
+    {"PV", "@", "D", "]", "8", "F9"},    {"\x03", "B", "L", "[", "7", "F8"}, {"SP", "X", "O", "G", "6", "F7"},
+    {"AR", "T", "R", "N", "5", "F6"},    {"TB", "I", "P", "E", "4", "F5"},  {"\x02", "M", "A", "K", "3", "F4"},
+    {"\x01", "S", "W", "U", "2", "F3"}, {"\x05", "^", "Y", "C", "1", "F2"}, {"RL", "Q", "F", "J", ";", "F1"},
+};
+
+/* 3x5 pixel font for key caps: bit (row*3 + col) */
+typedef struct { char ch; uint16_t bits; } Glyph35;
+static const Glyph35 FONT35[] = {
+    {0x01, 0x24BA},
+    {0x02, 0x2E92},
+    {0x03, 0x03C8},
+    {0x04, 0x09E0},
+    {0x05, 0x088B},
+    {'+', 0x05D0},
+    {',', 0x1400},
+    {'-', 0x01C0},
+    {'.', 0x2000},
+    {'/', 0x12A4},
+    {'0', 0x7B6F},
+    {'1', 0x749A},
+    {'2', 0x72A3},
+    {'3', 0x38A3},
+    {'4', 0x49ED},
+    {'5', 0x38CF},
+    {'6', 0x7BCE},
+    {'7', 0x24A7},
+    {'8', 0x7BEF},
+    {'9', 0x39EF},
+    {':', 0x0410},
+    {';', 0x1410},
+    {'<', 0x4454},
+    {'>', 0x1511},
+    {'?', 0x20A3},
+    {'@', 0x63EF},
+    {'A', 0x5BEA},
+    {'B', 0x3AEB},
+    {'C', 0x624E},
+    {'D', 0x3B6B},
+    {'E', 0x72CF},
+    {'F', 0x12CF},
+    {'G', 0x6B4E},
+    {'H', 0x5BED},
+    {'I', 0x7497},
+    {'J', 0x2B24},
+    {'K', 0x5AED},
+    {'L', 0x7249},
+    {'M', 0x5BFD},
+    {'N', 0x5FFD},
+    {'O', 0x2B6A},
+    {'P', 0x12EB},
+    {'Q', 0x6F6A},
+    {'R', 0x5AEB},
+    {'S', 0x388E},
+    {'T', 0x2497},
+    {'U', 0x7B6D},
+    {'V', 0x256D},
+    {'W', 0x5FED},
+    {'X', 0x5AAD},
+    {'Y', 0x24AD},
+    {'Z', 0x72A7},
+    {'[', 0x324B},
+    {'\\', 0x4889},
+    {']', 0x6926},
+    {'^', 0x002A},
+    {'_', 0x7000},
+};
+
+static void draw_glyph35(Canvas* canvas, int x, int y, char ch) {
+    for(size_t i = 0; i < COUNT_OF(FONT35); i++) {
+        if(FONT35[i].ch != ch) continue;
+        uint16_t b = FONT35[i].bits;
+        for(int k = 0; k < 15; k++)
+            if(b & (1u << k)) canvas_draw_dot(canvas, x + k % 3, y + k / 3);
+        return;
+    }
+}
+
+static void draw_text35(Canvas* canvas, int x, int y, const char* t) {
+    for(; *t; t++, x += 4) draw_glyph35(canvas, x, y, *t);
+}
+
 #define KBD_ROWS 6
+#define KBD_VISIBLE 3
+#define KBD_ROW_H 7
+#define KBD_TOP (64 - KBD_VISIBLE * KBD_ROW_H - 1) /* 42 */
 
 static int kbd_row_len(int r) {
     return r == KBD_ROWS - 1 ? SPEC_COLS + 1 : SPEC_COLS;
@@ -88,6 +175,11 @@ static int kbd_code(int r, int c) {
         c--;
     }
     return SPEC_KEY(SPEC_COLS - 1 - c, SPEC_ROWS - 1 - r);
+}
+
+static const char* key_cap(int code) {
+    if(code == SPEC_KEY_SHIFT) return "NR";
+    return KEY_CAP[code / SPEC_ROWS][code % SPEC_ROWS];
 }
 
 static const char* key_name(int code) {
@@ -173,7 +265,7 @@ static void clamp_view(App* app) {
     if(app->vy > maxy) app->vy = maxy;
     if(app->vx < 0) app->vx = 0;
     if(app->vy < 0) app->vy = 0;
-    if(app->view == SPEC_VIEW_1X) app->vx &= ~7;
+    if(app->view != SPEC_VIEW_FULL) app->vx &= ~7; /* renderers work on whole bytes */
 }
 
 /* keep the last written video byte (normally the text cursor) inside the window */
@@ -186,7 +278,7 @@ static void follow_cursor(App* app) {
     int w, h;
     spec_view_size(app->view, &w, &h);
     int scale = app->view == SPEC_VIEW_2X ? 2 : 1;
-    int visible_h = app->mode == ModeKbd ? h - 12 * scale : h; /* keyboard strip covers the bottom */
+    int visible_h = app->mode == ModeKbd ? h - (64 - KBD_TOP + 10) * scale : h; /* keyboard covers the bottom */
     int margin = 8 * scale;
     if(x < app->vx || x + 8 > app->vx + w) app->vx = x - w / 2;
     if(y < app->vy + margin / 2 || y + margin > app->vy + visible_h) app->vy = y - visible_h / 2;
@@ -246,38 +338,52 @@ static void draw_cb(Canvas* canvas, void* ctx) {
     }
 
     if(app->mode == ModeKbd && !app->menu) {
-        /* 7-key magnifier strip around the selected key */
-        int n = kbd_row_len(app->kbd_r);
+        /* compact keyboard: 3 of the 6 rows, all keys of each row, tiny 3x5 caps */
+        int first = app->kbd_r - 1;
+        if(first < 0) first = 0;
+        if(first > KBD_ROWS - KBD_VISIBLE) first = KBD_ROWS - KBD_VISIBLE;
         canvas_set_color(canvas, ColorWhite);
-        canvas_draw_box(canvas, 0, 52, 128, 12);
+        canvas_draw_box(canvas, 0, KBD_TOP, 128, 64 - KBD_TOP);
         canvas_set_color(canvas, ColorBlack);
-        canvas_draw_line(canvas, 0, 52, 127, 52);
-        canvas_set_font(canvas, FontKeyboard);
-        for(int i = -3; i <= 3; i++) {
-            int c = app->kbd_c + i;
-            if(c < 0 || c >= n) continue;
-            int x = 1 + (i + 3) * 18;
-            int code = kbd_code(app->kbd_r, c);
-            bool sel = i == 0;
-            bool down = (code == SPEC_KEY_SHIFT && app->shift_latch) || code == app->held_code;
-            if(sel || down) {
-                canvas_draw_rbox(canvas, x, 53, 17, 11, 2);
-                canvas_set_color(canvas, ColorWhite);
-            } else {
-                canvas_draw_rframe(canvas, x, 53, 17, 11, 2);
+        canvas_draw_line(canvas, 0, KBD_TOP, 127, KBD_TOP);
+        for(int vr = 0; vr < KBD_VISIBLE; vr++) {
+            int r = first + vr;
+            int n = kbd_row_len(r);
+            int cw = 126 / n;
+            int x0 = (128 - n * cw) / 2;
+            int y = KBD_TOP + 1 + vr * KBD_ROW_H;
+            for(int c = 0; c < n; c++) {
+                int code = kbd_code(r, c);
+                const char* cap = key_cap(code);
+                int x = x0 + c * cw;
+                bool sel = r == app->kbd_r && c == app->kbd_c;
+                bool down = (code == SPEC_KEY_SHIFT && app->shift_latch) || code == app->held_code;
+                if(sel || down) {
+                    canvas_draw_box(canvas, x, y, (size_t)(cw - 1), KBD_ROW_H);
+                    canvas_set_color(canvas, ColorWhite);
+                }
+                int tw = (int)strlen(cap) * 4 - 1;
+                draw_text35(canvas, x + (cw - 1 - tw) / 2, y + 1, cap);
+                canvas_set_color(canvas, ColorBlack);
+                /* dotted separators in rows with 2-letter caps, so neighbours don't merge */
+                if((r == 0 || r == KBD_ROWS - 1) && c + 1 < n && !sel)
+                    for(int dy = 1; dy < KBD_ROW_H; dy += 2) canvas_draw_dot(canvas, x + cw - 1, y + dy);
             }
-            canvas_draw_str_aligned(canvas, x + 9, 59, AlignCenter, AlignCenter, key_name(code));
-            canvas_set_color(canvas, ColorBlack);
         }
-        /* row indicator */
-        char rowtag[16];
-        snprintf(rowtag, sizeof(rowtag), "%d%s", (app->kbd_r + 1) & 7, app->shift_latch ? "N" : "");
-        int w = canvas_string_width(canvas, rowtag) + 4;
+        /* scroll marks: more rows above / below */
+        if(first > 0) canvas_draw_dot(canvas, 127, KBD_TOP + 2);
+        if(first + KBD_VISIBLE < KBD_ROWS) canvas_draw_dot(canvas, 127, 62);
+        /* full name of the selected key */
+        char tip[16];
+        int code = kbd_code(app->kbd_r, app->kbd_c);
+        snprintf(tip, sizeof(tip), "%s%s", app->shift_latch ? "NR+" : "", key_name(code));
+        canvas_set_font(canvas, FontKeyboard);
+        int w = canvas_string_width(canvas, tip) + 4;
         canvas_set_color(canvas, ColorWhite);
-        canvas_draw_box(canvas, 127 - w, 43, w + 1, 9);
+        canvas_draw_box(canvas, 127 - w, KBD_TOP - 10, (size_t)(w + 1), 10);
         canvas_set_color(canvas, ColorBlack);
-        canvas_draw_frame(canvas, 127 - w, 43, w + 1, 10);
-        canvas_draw_str_aligned(canvas, 128 - w / 2, 48, AlignCenter, AlignCenter, rowtag);
+        canvas_draw_frame(canvas, 127 - w, KBD_TOP - 10, (size_t)(w + 1), 11);
+        canvas_draw_str_aligned(canvas, 128 - w / 2, KBD_TOP - 5, AlignCenter, AlignCenter, tip);
     }
 
     if(app->mode == ModeJoy && !app->menu) {
@@ -297,7 +403,7 @@ static void draw_cb(Canvas* canvas, void* ctx) {
         canvas_draw_rframe(canvas, 6, 1, 116, 62, 3);
         canvas_set_font(canvas, FontPrimary);
         char title[32];
-        snprintf(title, sizeof(title), "Specialist  %d%%", app->perf_pct);
+        snprintf(title, sizeof(title), "Specialist  spd %d", app->perf_pct);
         canvas_draw_str_aligned(canvas, 64, 8, AlignCenter, AlignCenter, title);
         canvas_set_font(canvas, FontSecondary);
         int first = app->menu_sel - VISIBLE / 2;
@@ -716,7 +822,7 @@ int32_t specialist_app(void* p) {
     app->speed_idx = 1;
     app->sound = true;
     app->held_code = -1;
-    app->diag = true;
+    app->diag = false;
     app->kbd_r = 0;
     app->kbd_c = 0;
     for(int i = 0; i < 4; i++) app->joy_codes[i] = -1;

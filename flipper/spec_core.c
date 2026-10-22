@@ -339,7 +339,7 @@ static inline bool cond(Spec* m, int cc) {
     }
 }
 
-int i8080_step(Spec* m) {
+static inline __attribute__((always_inline)) int step(Spec* m) {
     if(C->ei_pending && --C->ei_pending == 0) C->inte = 1;
     if(C->halted) return 4;
     uint8_t op = fetch(m);
@@ -479,6 +479,10 @@ int i8080_step(Spec* m) {
     return cyc;
 }
 
+int i8080_step(Spec* m) {
+    return step(m);
+}
+
 #undef C
 
 /* ------------------------------------------------------------------ machine */
@@ -516,7 +520,8 @@ void spec_hard_reset(Spec* m) {
 }
 
 void spec_run(Spec* m, int32_t cycles) {
-    while(cycles > 0) cycles -= i8080_step(m);
+    /* the step is inlined here: no call per instruction on the hot path */
+    while(cycles > 0) cycles -= step(m);
 }
 
 static void set_key(Spec* m, int code, bool down) {
@@ -615,6 +620,9 @@ void spec_view_size(SpecView view, int* w, int* h) {
 
 /* Output is the Flipper/u8g2 native frame buffer layout: 8 pages of 128 bytes,
  * byte = 8 vertical pixels, bit 0 = top. Copying it into the canvas is a plain memcpy. */
+static const uint8_t POP2[4] = {0, 1, 1, 2};
+static const uint8_t POP3[8] = {0, 1, 1, 2, 1, 2, 2, 3};
+
 static inline void put(uint8_t* fb, int x, int y) {
     fb[(y >> 3) * 128 + x] |= (uint8_t)(1u << (y & 7));
 }
@@ -639,23 +647,46 @@ void spec_render(const Spec* m, uint8_t* fb, SpecView view, int vx, int vy) {
             }
         }
     } else if(view == SPEC_VIEW_2X) {
-        /* 2x2 block -> 1 pixel, lit when at least 2 of 4 are lit: keeps 1-px lines, drops lone dots */
+        /* 2x2 block -> 1 pixel, lit when at least 2 of 4 are lit: keeps 1-px lines, drops lone dots.
+         * Works on whole bytes: 8 output pixels = 2 source bytes x 2 rows. vx is a multiple of 8. */
+        int col0 = vx >> 3;
         for(int y = 0; y < 64; y++) {
-            int sy = vy + y * 2;
-            for(int x = 0; x < 128; x++) {
-                int sx = vx + x * 2;
-                if(px(vram, sx, sy) + px(vram, sx + 1, sy) + px(vram, sx, sy + 1) + px(vram, sx + 1, sy + 1) >= 2)
-                    put(fb, x, y);
+            const uint8_t* r0 = vram + vy + y * 2;
+            uint8_t* dst = fb + (y >> 3) * 128;
+            uint8_t bit = (uint8_t)(1u << (y & 7));
+            for(int g = 0; g < 16; g++) {
+                int c = (col0 + g * 2) * 256;
+                uint32_t a = ((uint32_t)r0[c] << 8) | r0[c + 256];
+                uint32_t b = ((uint32_t)r0[c + 1] << 8) | r0[c + 257];
+                if(!(a | b)) continue;
+                for(int j = 0; j < 8; j++) {
+                    int sh = 14 - 2 * j;
+                    if(POP2[(a >> sh) & 3] + POP2[(b >> sh) & 3] >= 2) dst[g * 8 + j] |= bit;
+                }
             }
         }
     } else {
-        /* whole screen: 3x4 block -> 1 pixel, lit when at least 2 of 12 source pixels are lit */
+        /* whole screen: 3x4 block -> 1 pixel, lit when at least 2 of 12 source pixels are lit.
+         * 8 output pixels = 3 source bytes (24 px) x 4 rows. */
         for(int y = 0; y < 64; y++) {
-            for(int x = 0; x < 128; x++) {
-                int sx = x * 3, sy = y * 4, cnt = 0;
-                for(int dy = 0; dy < 4; dy++)
-                    for(int dx = 0; dx < 3; dx++) cnt += px(vram, sx + dx, sy + dy);
-                if(cnt >= 2) put(fb, x, y);
+            const uint8_t* r0 = vram + y * 4;
+            uint8_t* dst = fb + (y >> 3) * 128;
+            uint8_t bit = (uint8_t)(1u << (y & 7));
+            for(int g = 0; g < 16; g++) {
+                int c = g * 3 * 256;
+                uint32_t w[4];
+                uint32_t any = 0;
+                for(int k = 0; k < 4; k++) {
+                    w[k] = ((uint32_t)r0[c + k] << 16) | ((uint32_t)r0[c + 256 + k] << 8) | r0[c + 512 + k];
+                    any |= w[k];
+                }
+                if(!any) continue;
+                for(int j = 0; j < 8; j++) {
+                    int sh = 21 - 3 * j;
+                    int cnt = POP3[(w[0] >> sh) & 7] + POP3[(w[1] >> sh) & 7] + POP3[(w[2] >> sh) & 7] +
+                              POP3[(w[3] >> sh) & 7];
+                    if(cnt >= 2) dst[g * 8 + j] |= bit;
+                }
             }
         }
     }
