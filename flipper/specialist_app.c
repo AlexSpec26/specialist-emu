@@ -380,9 +380,7 @@ static void pick_and_load(App* app, bool run) {
     view_port_enabled_set(app->vp, true);
     if(!chosen) return;
     uint16_t beg = 0, end = 0;
-    furi_mutex_acquire(app->mutex, FuriWaitForever);
     bool ok = load_rks_file(app, furi_string_get_cstr(app->last_path), run, &beg, &end);
-    furi_mutex_release(app->mutex);
     if(ok) {
         toast(app, "%s %04X-%04X", run ? "Run" : "Loaded", beg, end);
         if(run) {
@@ -457,17 +455,13 @@ static void menu_activate(App* app, int item, int dir) {
     case MiSound: app->sound = !app->sound; break;
     case MiOkKey: app->ok_key_idx = (app->ok_key_idx + OK_KEY_COUNT + dir) % OK_KEY_COUNT; break;
     case MiReset:
-        furi_mutex_acquire(app->mutex, FuriWaitForever);
         spec_reset(&app->m);
         release_everything(app);
-        furi_mutex_release(app->mutex);
         app->menu = false;
         break;
     case MiCold:
-        furi_mutex_acquire(app->mutex, FuriWaitForever);
         spec_hard_reset(&app->m);
         release_everything(app);
-        furi_mutex_release(app->mutex);
         app->menu = false;
         app->mode = ModeView;
         break;
@@ -667,6 +661,7 @@ int32_t specialist_app(void* p) {
     notification_message(app->notif, &sequence_display_backlight_enforce_on);
     app->speaker = furi_hal_speaker_acquire(500);
 
+    uint8_t* back = malloc(1024);
     uint32_t next = furi_get_tick();
     uint32_t perf_t0 = next;
     while(app->running) {
@@ -674,7 +669,8 @@ int32_t specialist_app(void* p) {
         while(furi_message_queue_get(app->queue, &ev, 0) == FuriStatusOk) handle_input(app, &ev);
         if(!app->running) break;
 
-        furi_mutex_acquire(app->mutex, FuriWaitForever);
+        /* Emulate WITHOUT holding the mutex: the GUI thread must never wait for a whole frame,
+         * otherwise it stalls and input events (delivered by the GUI thread) stop arriving. */
         if(!app->menu && app->m.rom_loaded) {
             uint32_t t0 = furi_get_tick();
             spec_run(&app->m, (int32_t)(SPEC_FRAME_CYCLES * SPEEDS[app->speed_idx]));
@@ -688,9 +684,12 @@ int32_t specialist_app(void* p) {
             update_sound(app, 0);
         }
         /* the whole-screen mode is expensive to scale: refresh it at 25 Hz */
-        if(app->view != SPEC_VIEW_FULL || (app->frame_no & 1) == 0 || app->menu)
-            spec_render(&app->m, app->xbm, app->view, app->vx, app->vy);
-        furi_mutex_release(app->mutex);
+        if(app->view != SPEC_VIEW_FULL || (app->frame_no & 1) == 0 || app->menu) {
+            spec_render(&app->m, back, app->view, app->vx, app->vy);
+            furi_mutex_acquire(app->mutex, FuriWaitForever);
+            memcpy(app->xbm, back, sizeof(app->xbm));
+            furi_mutex_release(app->mutex);
+        }
         view_port_update(app->vp);
 
         /* performance: % of real time the emulation needs (100% = just keeps up) */
@@ -703,19 +702,20 @@ int32_t specialist_app(void* p) {
             perf_t0 = now;
         }
 
+        /* Pace to 50 Hz, but ALWAYS give other threads (GUI, input) some time,
+         * even when the emulation cannot keep up with real time. */
         next += 1000 / SPEC_FPS;
         int32_t wait = (int32_t)(next - furi_get_tick());
-        if(wait > 0) {
-            if(furi_message_queue_get(app->queue, &ev, (uint32_t)wait) == FuriStatusOk) {
-                handle_input(app, &ev);
-                wait = (int32_t)(next - furi_get_tick());
-                if(wait > 0) furi_delay_ms((uint32_t)wait);
-            }
-        } else if(wait < -200) {
-            next = furi_get_tick(); /* fell behind: don't try to catch up */
+        if(wait < 3) wait = 3;
+        if(furi_message_queue_get(app->queue, &ev, (uint32_t)wait) == FuriStatusOk) {
+            handle_input(app, &ev);
+            int32_t rest = (int32_t)(next - furi_get_tick());
+            if(rest > 0) furi_delay_ms((uint32_t)rest);
         }
+        if((int32_t)(next - furi_get_tick()) < -100) next = furi_get_tick(); /* behind: don't catch up */
     }
 
+    free(back);
     if(app->speaker) {
         furi_hal_speaker_stop();
         furi_hal_speaker_release();

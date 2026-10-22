@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: C core self-test (8080 diagnostics)
         run: |
-          gcc -O2 -Wall -Wextra -std=c99 -o fct tools/flipper_core_test.c flipper/spec_core.c
+          gcc -DSPEC_TEST_BUILD -O2 -Wall -Wextra -std=c99 -o fct tools/flipper_core_test.c flipper/spec_core.c
           git clone --depth 1 https://github.com/superzazu/8080 /tmp/t8080
           ./fct cpu /tmp/t8080/cpu_tests/TST8080.COM /tmp/t8080/cpu_tests/8080PRE.COM /tmp/t8080/cpu_tests/CPUTEST.COM | tee cpu.log
           grep -q "CPU IS OPERATIONAL" cpu.log

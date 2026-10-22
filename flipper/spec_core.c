@@ -10,7 +10,9 @@
 
 #include <string.h>
 
-/* io_base / ram_top let the CPU tests run on a flat 64 KB RAM */
+/* io_base / ram_top let the CPU tests run on a flat 64 KB RAM (desktop test build only);
+ * on the device they are compile-time constants so the memory fast path stays cheap. */
+#ifdef SPEC_TEST_BUILD
 static uint32_t io_base = 0xF000;
 static uint32_t ram_top = 0xC000;
 
@@ -18,6 +20,13 @@ void spec_core_flat_memory(bool flat) {
     io_base = flat ? 0x10000 : 0xF000;
     ram_top = flat ? 0x10000 : 0xC000;
 }
+#else
+#define io_base 0xF000u
+#define ram_top 0xC000u
+void spec_core_flat_memory(bool flat) {
+    (void)flat;
+}
+#endif
 
 static const uint8_t CYCLES[256] = {
     4, 10, 7, 5, 5, 5, 7, 4, 4, 10, 7, 5, 5, 5, 7, 4,
