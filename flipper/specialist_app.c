@@ -17,6 +17,11 @@
 #include <storage/storage.h>
 #include <notification/notification_messages.h>
 
+/* Direct access to the LCD frame buffer. Exported by the firmware API, but some SDKs
+ * (e.g. Momentum) only declare it in a private header. */
+uint8_t* canvas_get_buffer(Canvas* canvas);
+size_t canvas_get_buffer_size(const Canvas* canvas);
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
