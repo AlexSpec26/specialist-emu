@@ -32,14 +32,19 @@ jobs:
           - name: official
             sdk-channel: release
             sdk-index-url: ''
+            fb-direct: 1
           - name: momentum
             sdk-channel: release
             sdk-index-url: https://up.momentum-fw.dev/firmware/directory.json
+            fb-direct: 0
           - name: unleashed
             sdk-channel: release
             sdk-index-url: https://up.unleashedflip.com/directory.json
+            fb-direct: 1
     steps:
       - uses: actions/checkout@v4
+      - name: Configure for firmware
+        run: echo "#define SPEC_FB_DIRECT ${{ matrix.fb-direct }}" > flipper/build_cfg.h
       - name: Build .fap
         id: build
         uses: flipperdevices/flipperzero-ufbt-action@v0.1.4
