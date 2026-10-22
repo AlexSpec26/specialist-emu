@@ -222,8 +222,8 @@ static void draw_cb(Canvas* canvas, void* ctx) {
             canvas_set_color(canvas, ColorBlack);
         }
         /* row indicator */
-        char rowtag[8];
-        snprintf(rowtag, sizeof(rowtag), "%d%s", app->kbd_r + 1, app->shift_latch ? "N" : "");
+        char rowtag[16];
+        snprintf(rowtag, sizeof(rowtag), "%d%s", (app->kbd_r + 1) & 7, app->shift_latch ? "N" : "");
         int w = canvas_string_width(canvas, rowtag) + 4;
         canvas_set_color(canvas, ColorWhite);
         canvas_draw_box(canvas, 127 - w, 43, w + 1, 9);
