@@ -91,7 +91,7 @@ void spec_poke(Spec* m, uint16_t addr, uint8_t v);
 /* Starts execution at addr with keys released. */
 void spec_start_at(Spec* m, uint16_t addr);
 
-/* ---- rendering to a 128x64 1-bpp XBM buffer (16 bytes per row, LSB = leftmost) ---- */
+/* ---- rendering to a 128x64 1-bpp buffer in u8g2 page layout (fb[(y/8)*128 + x], bit y%8) ---- */
 typedef enum {
     SPEC_VIEW_1X = 0,  /* 1:1 window 128x64, pan in 8 px steps horizontally */
     SPEC_VIEW_2X,      /* 256x128 area, 2x2 -> 1 */
@@ -99,7 +99,7 @@ typedef enum {
     SPEC_VIEW_COUNT
 } SpecView;
 
-void spec_render(const Spec* m, uint8_t* xbm, SpecView view, int vx, int vy);
+void spec_render(const Spec* m, uint8_t* fb, SpecView view, int vx, int vy);
 
 /* Size of the area visible in the given mode, in Specialist pixels. */
 void spec_view_size(SpecView view, int* w, int* h);

@@ -181,16 +181,19 @@ static void follow_cursor(App* app) {
 
 static void draw_cb(Canvas* canvas, void* ctx) {
     App* app = ctx;
+    /* The emulator renders in the display's native page layout, so the picture is a 1 KB copy
+     * (canvas_draw_xbm would plot 8192 pixels one by one and eat most of the CPU). */
+    uint8_t* fb = canvas_get_buffer(canvas);
+    size_t fb_size = canvas_get_buffer_size(canvas);
+    if(fb_size > sizeof(app->xbm)) fb_size = sizeof(app->xbm);
     furi_mutex_acquire(app->mutex, FuriWaitForever);
-    canvas_clear(canvas);
     if(app->invert) {
-        canvas_set_color(canvas, ColorBlack);
-        canvas_draw_box(canvas, 0, 0, 128, 64);
-        canvas_set_color(canvas, ColorWhite);
+        /* dark screen: lit Specialist pixels are "off" LCD pixels, i.e. glowing on black */
+        for(size_t i = 0; i < fb_size; i++) fb[i] = (uint8_t)~app->xbm[i];
     } else {
-        canvas_set_color(canvas, ColorBlack);
+        memcpy(fb, app->xbm, fb_size);
     }
-    canvas_draw_xbm(canvas, 0, 0, 128, 64, app->xbm);
+    furi_mutex_release(app->mutex);
     canvas_set_color(canvas, ColorBlack);
 
     if(!app->m.rom_loaded) {
@@ -299,7 +302,7 @@ static void draw_cb(Canvas* canvas, void* ctx) {
         snprintf(
             d,
             sizeof(d),
-            "%lu %lu/%lu %d%%",
+            "%lu %lu/%lu s%d",
             (unsigned long)(app->frame_no % 100000),
             (unsigned long)(app->inputs_rx % 1000),
             (unsigned long)(app->inputs_done % 1000),
@@ -323,7 +326,6 @@ static void draw_cb(Canvas* canvas, void* ctx) {
         canvas_draw_frame(canvas, x, 0, w, 11);
         canvas_draw_str_aligned(canvas, 64, 5, AlignCenter, AlignCenter, app->toast);
     }
-    furi_mutex_release(app->mutex);
 }
 
 static void input_cb(InputEvent* ev, void* ctx) {
@@ -689,6 +691,7 @@ int32_t specialist_app(void* p) {
     app->speaker = furi_hal_speaker_acquire(500);
 
     uint8_t* back = malloc(1024);
+    furi_thread_set_current_priority(FuriThreadPriorityLow);
     uint32_t next = furi_get_tick();
     uint32_t perf_t0 = next;
     while(app->running) {
@@ -696,18 +699,17 @@ int32_t specialist_app(void* p) {
         while(furi_message_queue_get(app->queue, &ev, 0) == FuriStatusOk) handle_input(app, &ev);
         if(!app->running) break;
 
-        /* Emulate WITHOUT holding the mutex: the GUI thread must never wait for a whole frame,
-         * otherwise it stalls and input events (delivered by the GUI thread) stop arriving. */
+        /* Emulate WITHOUT holding the mutex: the GUI thread must never wait for a whole frame. */
         if(!app->menu && app->m.rom_loaded) {
-            /* Run the frame in small slices and never spend more than 14 ms of a 20 ms frame:
-             * if the CPU is too slow the emulated machine slows down, the UI stays alive. */
+            /* Run the frame in slices and never spend more than 12 ms of a 20 ms frame:
+             * if the CPU is too slow the emulated machine slows down, the system stays alive. */
             uint32_t t0 = furi_get_tick();
             int32_t target = (int32_t)(SPEC_FRAME_CYCLES * SPEEDS[app->speed_idx]);
             int32_t done = 0;
             while(done < target) {
                 spec_run(&app->m, 4000);
                 done += 4000;
-                if(furi_get_tick() - t0 >= 14) break;
+                if(furi_get_tick() - t0 >= 12) break;
             }
             app->cycles_acc += (uint32_t)done;
             app->emu_ms_acc += furi_get_tick() - t0;
@@ -719,48 +721,44 @@ int32_t specialist_app(void* p) {
         } else {
             update_sound(app, 0);
         }
-        /* the whole-screen mode is expensive to scale: refresh it at 25 Hz */
-        if(app->view != SPEC_VIEW_FULL || (app->frame_no & 1) == 0 || app->menu) {
+        /* redraw at 25 Hz (the real CRT ran at 50, but the Flipper LCD is slow anyway) */
+        app->loops++;
+        if((app->loops & 1) == 0 || app->menu) {
             spec_render(&app->m, back, app->view, app->vx, app->vy);
             furi_mutex_acquire(app->mutex, FuriWaitForever);
             memcpy(app->xbm, back, sizeof(app->xbm));
             furi_mutex_release(app->mutex);
+            view_port_update(app->vp);
         }
-        view_port_update(app->vp);
 
-        /* performance: % of real time the emulation needs (100% = just keeps up) */
         uint32_t now = furi_get_tick();
-        app->loops++;
         if(now - perf_t0 >= 1000) {
             /* achieved speed: emulated cycles per real second vs a real 2 MHz Specialist */
             uint32_t el = now - perf_t0;
             app->perf_pct = (int)(app->cycles_acc / el / (SPEC_CPU_HZ / 100000)); /* cycles/ms / 20 = % */
             FURI_LOG_I(
                 TAG,
-                "speed %d%% emu %lums/%luf loops %lu in %lu/%lu",
+                "speed %d emu %lums/%luf in %lu/%lu",
                 app->perf_pct,
                 (unsigned long)app->emu_ms_acc,
                 (unsigned long)app->emu_frames_acc,
-                (unsigned long)app->loops,
                 (unsigned long)app->inputs_rx,
                 (unsigned long)app->inputs_done);
             app->cycles_acc = 0;
             app->emu_ms_acc = app->emu_frames_acc = 0;
-            app->loops = 0;
             perf_t0 = now;
         }
 
-        /* Pace to 50 Hz, but ALWAYS give other threads (GUI, input) some time,
-         * even when the emulation cannot keep up with real time. */
+        /* Pace to 50 Hz and ALWAYS sleep a little, so every system thread gets CPU time. */
         next += 1000 / SPEC_FPS;
         int32_t wait = (int32_t)(next - furi_get_tick());
-        if(wait < 3) wait = 3;
+        if(wait < 5) wait = 5;
         if(furi_message_queue_get(app->queue, &ev, (uint32_t)wait) == FuriStatusOk) {
             handle_input(app, &ev);
             int32_t rest = (int32_t)(next - furi_get_tick());
             if(rest > 0) furi_delay_ms((uint32_t)rest);
         }
-        if((int32_t)(next - furi_get_tick()) < -100) next = furi_get_tick(); /* behind: don't catch up */
+        if((int32_t)(next - furi_get_tick()) < -60) next = furi_get_tick(); /* behind: don't catch up */
     }
 
     free(back);

@@ -601,20 +601,6 @@ bool spec_load_rks(Spec* m, const uint8_t* data, size_t n, bool run, uint16_t* s
 
 /* ------------------------------------------------------------------ rendering */
 
-static uint8_t REV[256];
-static bool rev_ready;
-
-static void init_rev(void) {
-    if(rev_ready) return;
-    for(int i = 0; i < 256; i++) {
-        uint8_t r = 0;
-        for(int b = 0; b < 8; b++)
-            if(i & (1 << b)) r |= (uint8_t)(0x80 >> b);
-        REV[i] = r;
-    }
-    rev_ready = true;
-}
-
 static inline int px(const uint8_t* vram, int x, int y) {
     return (vram[(x >> 3) * 256 + y] >> (7 - (x & 7))) & 1;
 }
@@ -627,37 +613,49 @@ void spec_view_size(SpecView view, int* w, int* h) {
     }
 }
 
-void spec_render(const Spec* m, uint8_t* xbm, SpecView view, int vx, int vy) {
-    init_rev();
+/* Output is the Flipper/u8g2 native frame buffer layout: 8 pages of 128 bytes,
+ * byte = 8 vertical pixels, bit 0 = top. Copying it into the canvas is a plain memcpy. */
+static inline void put(uint8_t* fb, int x, int y) {
+    fb[(y >> 3) * 128 + x] |= (uint8_t)(1u << (y & 7));
+}
+
+void spec_render(const Spec* m, uint8_t* fb, SpecView view, int vx, int vy) {
     const uint8_t* vram = m->mem + 0x9000;
-    memset(xbm, 0, 1024);
+    memset(fb, 0, 1024);
     if(view == SPEC_VIEW_1X) {
         int col0 = vx >> 3; /* vx is a multiple of 8 */
-        for(int y = 0; y < 64; y++) {
-            const uint8_t* src = vram + col0 * 256 + vy + y;
-            uint8_t* dst = xbm + y * 16;
-            for(int b = 0; b < 16; b++) dst[b] = REV[src[b * 256]];
+        for(int page = 0; page < 8; page++) {
+            for(int bx = 0; bx < 16; bx++) {
+                const uint8_t* src = vram + (col0 + bx) * 256 + vy + page * 8;
+                uint8_t* dst = fb + page * 128 + bx * 8;
+                /* transpose an 8x8 block: 8 horizontal source bytes -> 8 vertical output bytes */
+                for(int k = 0; k < 8; k++) {
+                    uint8_t b = src[k];
+                    if(!b) continue;
+                    uint8_t bit = (uint8_t)(1u << k);
+                    for(int j = 0; j < 8; j++)
+                        if(b & (0x80 >> j)) dst[j] |= bit;
+                }
+            }
         }
     } else if(view == SPEC_VIEW_2X) {
         /* 2x2 block -> 1 pixel, lit when at least 2 of 4 are lit: keeps 1-px lines, drops lone dots */
         for(int y = 0; y < 64; y++) {
             int sy = vy + y * 2;
-            uint8_t* dst = xbm + y * 16;
             for(int x = 0; x < 128; x++) {
                 int sx = vx + x * 2;
                 if(px(vram, sx, sy) + px(vram, sx + 1, sy) + px(vram, sx, sy + 1) + px(vram, sx + 1, sy + 1) >= 2)
-                    dst[x >> 3] |= (uint8_t)(1u << (x & 7));
+                    put(fb, x, y);
             }
         }
     } else {
         /* whole screen: 3x4 block -> 1 pixel, lit when at least 2 of 12 source pixels are lit */
         for(int y = 0; y < 64; y++) {
-            uint8_t* dst = xbm + y * 16;
             for(int x = 0; x < 128; x++) {
                 int sx = x * 3, sy = y * 4, cnt = 0;
                 for(int dy = 0; dy < 4; dy++)
                     for(int dx = 0; dx < 3; dx++) cnt += px(vram, sx + dx, sy + dy);
-                if(cnt >= 2) dst[x >> 3] |= (uint8_t)(1u << (x & 7));
+                if(cnt >= 2) put(fb, x, y);
             }
         }
     }

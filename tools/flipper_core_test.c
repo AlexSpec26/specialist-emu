@@ -85,7 +85,7 @@ static int get_full(int x, int y, void* ctx) {
 
 static int get_xbm(int x, int y, void* ctx) {
     uint8_t* b = ctx;
-    return (b[y * 16 + (x >> 3)] >> (x & 7)) & 1;
+    return (b[(y >> 3) * 128 + x] >> (y & 7)) & 1;
 }
 
 int main(int argc, char** argv) {
