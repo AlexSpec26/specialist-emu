@@ -1,0 +1,15 @@
+App(
+    appid="specialist",
+    name="Specialist",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="specialist_app",
+    requires=["gui", "dialogs", "storage", "notification"],
+    stack_size=4 * 1024,
+    fap_category="Games",
+    fap_icon="specialist_10px.png",
+    fap_file_assets="assets",
+    fap_version="1.0",
+    fap_description="Soviet home computer Specialist (KR580VM80A, 1987) emulator",
+    fap_author="AlexSpec26",
+    sources=["spec_core.c", "specialist_app.c"],
+)

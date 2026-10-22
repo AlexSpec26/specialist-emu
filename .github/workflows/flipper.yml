@@ -1,0 +1,83 @@
+name: Build Flipper app
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'flipper/**', 'tools/flipper_core_test.c', '.github/workflows/flipper.yml' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  core-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: C core self-test (8080 diagnostics)
+        run: |
+          gcc -O2 -Wall -Wextra -std=c99 -o fct tools/flipper_core_test.c flipper/spec_core.c
+          git clone --depth 1 https://github.com/superzazu/8080 /tmp/t8080
+          ./fct cpu /tmp/t8080/cpu_tests/TST8080.COM /tmp/t8080/cpu_tests/8080PRE.COM /tmp/t8080/cpu_tests/CPUTEST.COM | tee cpu.log
+          grep -q "CPU IS OPERATIONAL" cpu.log
+          grep -q "CPU TESTS OK" cpu.log
+
+  build:
+    needs: core-test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: official
+            sdk-channel: release
+            sdk-index-url: ''
+          - name: momentum
+            sdk-channel: release
+            sdk-index-url: https://up.momentum-fw.dev/firmware/directory.json
+          - name: unleashed
+            sdk-channel: release
+            sdk-index-url: https://up.unleashedflip.com/directory.json
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build .fap
+        id: build
+        uses: flipperdevices/flipperzero-ufbt-action@v0.1.4
+        with:
+          app-dir: flipper
+          sdk-channel: ${{ matrix.sdk-channel }}
+          sdk-index-url: ${{ matrix.sdk-index-url }}
+      - name: Rename
+        run: |
+          mkdir -p out
+          for f in ${{ steps.build.outputs.fap-artifacts }}; do
+            cp "$f" "out/specialist-${{ matrix.name }}-api${{ steps.build.outputs.api-version }}.fap"
+          done
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fap-${{ matrix.name }}
+          path: out/*.fap
+
+  release:
+    needs: build
+    if: always() && needs.build.result != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: faps
+          pattern: fap-*
+          merge-multiple: true
+      - name: List
+        run: ls -la faps
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: flipper-${{ github.run_number }}
+          name: Специалист для Flipper Zero, сборка ${{ github.run_number }}
+          files: faps/*.fap
+          make_latest: false
+          body: |
+            Выберите файл под свою прошивку (official / momentum / unleashed) и номер API,
+            скопируйте на SD-карту Flipper в папку /ext/apps/Games/ и запустите из меню Apps → Games.
