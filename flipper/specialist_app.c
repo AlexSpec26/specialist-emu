@@ -19,8 +19,11 @@
 
 /* Direct access to the LCD frame buffer. Exported by the firmware API, but some SDKs
  * (e.g. Momentum) only declare it in a private header. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wredundant-decls"
 uint8_t* canvas_get_buffer(Canvas* canvas);
 size_t canvas_get_buffer_size(const Canvas* canvas);
+#pragma GCC diagnostic pop
 
 #include <stdarg.h>
 #include <stdio.h>

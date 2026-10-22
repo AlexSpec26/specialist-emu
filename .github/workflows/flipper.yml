@@ -47,6 +47,12 @@ jobs:
           app-dir: flipper
           sdk-channel: ${{ matrix.sdk-channel }}
           sdk-index-url: ${{ matrix.sdk-index-url }}
+      - name: Report build errors
+        if: failure()
+        env:
+          ERRS: ${{ steps.build.outputs.build-errors }}
+        run: |
+          printf '%s\n' "$ERRS" | tail -40 | while IFS= read -r line; do echo "::error::$line"; done
       - name: Rename
         run: |
           mkdir -p out
