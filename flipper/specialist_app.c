@@ -126,6 +126,12 @@ typedef struct {
     int ok_key_idx;
 
     uint32_t frame_no;
+    /* diagnostics */
+    bool diag;
+    volatile uint32_t inputs_rx; /* counted in the GUI thread */
+    uint32_t inputs_done;
+    uint32_t loops;
+    uint32_t cycles_acc; /* emulated cycles in the current second */
     uint32_t emu_ms_acc, emu_frames_acc;
     int perf_pct;
 
@@ -288,6 +294,24 @@ static void draw_cb(Canvas* canvas, void* ctx) {
         }
     }
 
+    if(app->diag && !app->menu) {
+        char d[40];
+        snprintf(
+            d,
+            sizeof(d),
+            "%lu %lu/%lu %d%%",
+            (unsigned long)(app->frame_no % 100000),
+            (unsigned long)(app->inputs_rx % 1000),
+            (unsigned long)(app->inputs_done % 1000),
+            app->perf_pct);
+        canvas_set_font(canvas, FontKeyboard);
+        int w = canvas_string_width(canvas, d) + 3;
+        canvas_set_color(canvas, ColorWhite);
+        canvas_draw_box(canvas, 0, 0, w, 9);
+        canvas_set_color(canvas, ColorBlack);
+        canvas_draw_str(canvas, 1, 7, d);
+    }
+
     if(app->toast[0] && furi_get_tick() < app->toast_until) {
         canvas_set_font(canvas, FontSecondary);
         int w = canvas_string_width(canvas, app->toast) + 8;
@@ -304,6 +328,7 @@ static void draw_cb(Canvas* canvas, void* ctx) {
 
 static void input_cb(InputEvent* ev, void* ctx) {
     App* app = ctx;
+    app->inputs_rx++;
     furi_message_queue_put(app->queue, ev, 0);
 }
 
@@ -470,6 +495,7 @@ static void menu_activate(App* app, int item, int dir) {
 }
 
 static void handle_input(App* app, const InputEvent* ev) {
+    app->inputs_done++;
     if(ev->key == InputKeyBack && ev->type == InputTypeLong) {
         app->running = false;
         return;
@@ -648,6 +674,7 @@ int32_t specialist_app(void* p) {
     app->speed_idx = 1;
     app->sound = true;
     app->held_code = -1;
+    app->diag = true;
     app->kbd_r = 0;
     app->kbd_c = 0;
     for(int i = 0; i < 4; i++) app->joy_codes[i] = -1;
@@ -672,8 +699,17 @@ int32_t specialist_app(void* p) {
         /* Emulate WITHOUT holding the mutex: the GUI thread must never wait for a whole frame,
          * otherwise it stalls and input events (delivered by the GUI thread) stop arriving. */
         if(!app->menu && app->m.rom_loaded) {
+            /* Run the frame in small slices and never spend more than 14 ms of a 20 ms frame:
+             * if the CPU is too slow the emulated machine slows down, the UI stays alive. */
             uint32_t t0 = furi_get_tick();
-            spec_run(&app->m, (int32_t)(SPEC_FRAME_CYCLES * SPEEDS[app->speed_idx]));
+            int32_t target = (int32_t)(SPEC_FRAME_CYCLES * SPEEDS[app->speed_idx]);
+            int32_t done = 0;
+            while(done < target) {
+                spec_run(&app->m, 4000);
+                done += 4000;
+                if(furi_get_tick() - t0 >= 14) break;
+            }
+            app->cycles_acc += (uint32_t)done;
             app->emu_ms_acc += furi_get_tick() - t0;
             app->emu_frames_acc++;
             app->frame_no++;
@@ -694,11 +730,23 @@ int32_t specialist_app(void* p) {
 
         /* performance: % of real time the emulation needs (100% = just keeps up) */
         uint32_t now = furi_get_tick();
-        if(now - perf_t0 >= 1000 && app->emu_frames_acc > 0) {
-            uint32_t budget = app->emu_frames_acc * (1000 / SPEC_FPS);
-            app->perf_pct = (int)(budget * 100 / (app->emu_ms_acc ? app->emu_ms_acc : 1));
-            if(app->perf_pct > 999) app->perf_pct = 999;
+        app->loops++;
+        if(now - perf_t0 >= 1000) {
+            /* achieved speed: emulated cycles per real second vs a real 2 MHz Specialist */
+            uint32_t el = now - perf_t0;
+            app->perf_pct = (int)(app->cycles_acc / el / (SPEC_CPU_HZ / 100000)); /* cycles/ms / 20 = % */
+            FURI_LOG_I(
+                TAG,
+                "speed %d%% emu %lums/%luf loops %lu in %lu/%lu",
+                app->perf_pct,
+                (unsigned long)app->emu_ms_acc,
+                (unsigned long)app->emu_frames_acc,
+                (unsigned long)app->loops,
+                (unsigned long)app->inputs_rx,
+                (unsigned long)app->inputs_done);
+            app->cycles_acc = 0;
             app->emu_ms_acc = app->emu_frames_acc = 0;
+            app->loops = 0;
             perf_t0 = now;
         }
 
