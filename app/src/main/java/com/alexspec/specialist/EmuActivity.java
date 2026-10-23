@@ -301,9 +301,18 @@ public final class EmuActivity extends Activity implements MainView.Host {
         view.vibrate = prefs.getBoolean("vibrate", true);
         emu.colorMode = prefs.getInt("color", Specialist.COLOR_WHITE);
         emu.sound = prefs.getBoolean("sound", true);
-        float sp = prefs.getFloat("speed", 1f);
-        emu.speed = sp;
-        view.speed = sp;
+        int slow = Math.max(1, Math.min(100, prefs.getInt("slow", 1)));
+        emu.speed = 1f / slow;
+        view.speed = 1f / slow;
+        // memory visualisation
+        boolean map = prefs.getBoolean("map", false);
+        if (map && !machine.trace.enabled) machine.trace.clear();
+        machine.trace.enabled = map;
+        machine.trace.setColors(prefs.getInt("colR", 0xFF30FF40), prefs.getInt("colW", 0xFFFF3030),
+                prefs.getInt("colRW", 0xFFFFE030), prefs.getInt("colX", 0xFF20E8FF));
+        machine.trace.setFlashFrames(prefs.getInt("flash", 5));
+        view.mapOn = map;
+        view.ctrlAlpha = prefs.getInt("ctrlAlpha", 100) / 100f;
         view.config = ControlConfig.load(prefs, program);
         view.title = program;
         machine.releaseAllKeys();
@@ -371,8 +380,11 @@ public final class EmuActivity extends Activity implements MainView.Host {
         actions.add(this::exportState);
         items.add("📦  Импорт сохранения…");
         actions.add(this::importState);
-        items.add(String.format(java.util.Locale.US, "⏱  Скорость: %.1f×…", emu.speed));
+        int slowNow = Math.round(1f / emu.speed);
+        items.add(slowNow <= 1 ? "⏱  Замедление: нет (реальная скорость)…" : "⏱  Замедление: в " + slowNow + " раз…");
         actions.add(this::showSpeed);
+        items.add("🔬  Визуализация памяти…");
+        actions.add(this::showVisualization);
         items.add("🔄  Перезапуск (сброс)");
         actions.add(() -> emu.post(() -> {
             machine.reset();
@@ -404,19 +416,145 @@ public final class EmuActivity extends Activity implements MainView.Host {
         box.setOrientation(android.widget.LinearLayout.VERTICAL);
         int pad = (int) (20 * getResources().getDisplayMetrics().density);
         box.setPadding(pad, pad / 2, pad, 0);
+        android.widget.TextView hint = new android.widget.TextView(this);
+        hint.setText("Во сколько раз медленнее настоящего «Специалиста»: 1 — реальная скорость, "
+                + "100 — в сто раз медленнее (удобно рассматривать карту памяти).");
+        android.widget.EditText input = new android.widget.EditText(this);
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        input.setText(String.valueOf(Math.max(1, Math.round(1f / emu.speed))));
+        input.setSelectAllOnFocus(true);
+        input.setTextSize(28);
+        input.setGravity(android.view.Gravity.CENTER);
+        box.addView(hint);
+        box.addView(input);
+        AlertDialog d = show(new AlertDialog.Builder(this)
+                .setTitle("Замедление")
+                .setView(box)
+                .setPositiveButton("OK", (dlg, w) -> {
+                    int v;
+                    try {
+                        v = Integer.parseInt(input.getText().toString().trim());
+                    } catch (NumberFormatException e) {
+                        v = 1;
+                    }
+                    v = Math.max(1, Math.min(100, v));
+                    prefs.edit().putInt("slow", v).apply();
+                    applySettings();
+                    toast(v == 1 ? "Реальная скорость" : "Замедление в " + v + " раз");
+                })
+                .setNeutralButton("1 — реальная", (dlg, w) -> {
+                    prefs.edit().putInt("slow", 1).apply();
+                    applySettings();
+                })
+                .setNegativeButton("Отмена", null));
+        input.requestFocus();
+        if (d.getWindow() != null)
+            d.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+    }
+
+    private static final String[] COLOR_NAMES = {"зелёный", "красный", "жёлтый", "голубой", "синий",
+            "пурпурный", "оранжевый", "белый"};
+    private static final int[] COLOR_VALUES = {0xFF30FF40, 0xFFFF3030, 0xFFFFE030, 0xFF20E8FF, 0xFF4070FF,
+            0xFFFF40FF, 0xFFFF9020, 0xFFFFFFFF};
+
+    private static String colorName(int c) {
+        for (int i = 0; i < COLOR_VALUES.length; i++) if (COLOR_VALUES[i] == c) return COLOR_NAMES[i];
+        return String.format("#%06X", c & 0xFFFFFF);
+    }
+
+    private void showVisualization() {
+        boolean on = prefs.getBoolean("map", false);
+        int flash = prefs.getInt("flash", 5);
+        String[] keys = {"colR", "colW", "colRW", "colX"};
+        int[] defs = {0xFF30FF40, 0xFFFF3030, 0xFFFFE030, 0xFF20E8FF};
+        String[] what = {"Чтение", "Запись", "Чтение и запись", "Исполнение (команды и операнды)"};
+        String[] items = {
+            "Карта памяти: " + (on ? "ВКЛ" : "выкл"),
+            what[0] + ": " + colorName(prefs.getInt(keys[0], defs[0])),
+            what[1] + ": " + colorName(prefs.getInt(keys[1], defs[1])),
+            what[2] + ": " + colorName(prefs.getInt(keys[2], defs[2])),
+            what[3] + ": " + colorName(prefs.getInt(keys[3], defs[3])),
+            String.format(java.util.Locale.US, "Вспышка: %.1f с", flash / 50f),
+            "Прозрачность джойстика и кнопок: " + (100 - prefs.getInt("ctrlAlpha", 100)) + "%",
+            "Стереть следы обращений",
+            "Как пользоваться",
+        };
+        show(new AlertDialog.Builder(this)
+                .setTitle("Визуализация памяти")
+                .setItems(items, (d, which) -> {
+                    if (which == 0) {
+                        boolean nv = !on;
+                        prefs.edit().putBoolean("map", nv).apply();
+                        // joystick over the map is much nicer half-transparent
+                        if (nv && !prefs.contains("ctrlAlpha")) prefs.edit().putInt("ctrlAlpha", 50).apply();
+                        applySettings();
+                        if (nv && view.getWidth() > view.getHeight())
+                            toast("Карта памяти показывается в портретной ориентации");
+                        showVisualization();
+                    } else if (which >= 1 && which <= 4) {
+                        String key = keys[which - 1];
+                        int cur = prefs.getInt(key, defs[which - 1]);
+                        int sel = -1;
+                        for (int i = 0; i < COLOR_VALUES.length; i++) if (COLOR_VALUES[i] == cur) sel = i;
+                        show(new AlertDialog.Builder(this)
+                                .setTitle(what[which - 1])
+                                .setSingleChoiceItems(COLOR_NAMES, sel, (d2, w) -> {
+                                    prefs.edit().putInt(key, COLOR_VALUES[w]).apply();
+                                    d2.dismiss();
+                                    applySettings();
+                                    showVisualization();
+                                }));
+                    } else if (which == 5) {
+                        String[] names = {"0.1 с", "0.2 с", "0.5 с", "1 с"};
+                        int[] vals = {5, 10, 25, 50};
+                        int sel = 0;
+                        for (int i = 0; i < vals.length; i++) if (vals[i] == flash) sel = i;
+                        show(new AlertDialog.Builder(this)
+                                .setTitle("Длительность вспышки")
+                                .setSingleChoiceItems(names, sel, (d2, w) -> {
+                                    prefs.edit().putInt("flash", vals[w]).apply();
+                                    d2.dismiss();
+                                    applySettings();
+                                    showVisualization();
+                                }));
+                    } else if (which == 6) {
+                        showAlpha();
+                    } else if (which == 7) {
+                        emu.post(machine.trace::clear);
+                        toast("Следы стёрты");
+                    } else {
+                        show(new AlertDialog.Builder(this)
+                                .setTitle("Карта памяти")
+                                .setMessage("Под экраном показаны все 64 КБ: один бит — одна точка, байт — полоска "
+                                        + "из 8 точек. Адреса идут сверху вниз столбцами по 256 байт, как в экранной "
+                                        + "памяти «Специалиста»: номер столбца — старший байт адреса. "
+                                        + "Верхняя половина — 0000–7FFF, нижняя — 8000–FFFF.\n\n"
+                                        + "Байты вспыхивают при чтении, записи и исполнении. "
+                                        + "Коснитесь карты — появится адрес, значение и что это за область.\n\n"
+                                        + "Совет: пауза (тап по экрану) и замедление помогают рассмотреть, "
+                                        + "как «шевелится» код.")
+                                .setPositiveButton("OK", (d2, w) -> showVisualization()));
+                    }
+                })
+                .setPositiveButton("Готово", null));
+    }
+
+    private void showAlpha() {
+        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int pad = (int) (20 * getResources().getDisplayMetrics().density);
+        box.setPadding(pad, pad / 2, pad, 0);
         android.widget.TextView label = new android.widget.TextView(this);
-        label.setTextSize(28);
+        label.setTextSize(22);
         label.setGravity(android.view.Gravity.CENTER);
         android.widget.SeekBar bar = new android.widget.SeekBar(this);
-        bar.setMax(48); // 0.2 .. 5.0 in steps of 0.1
-        int pos = Math.round((emu.speed - 0.2f) * 10f);
-        bar.setProgress(Math.max(0, Math.min(48, pos)));
+        bar.setMax(90); // opacity 10..100 %
+        bar.setProgress(prefs.getInt("ctrlAlpha", 100) - 10);
         Runnable apply = () -> {
-            float v = Math.round((0.2f + bar.getProgress() * 0.1f) * 10f) / 10f;
-            emu.speed = v;
-            view.speed = v;
-            label.setText(String.format(java.util.Locale.US, "%.1f×", v));
-            prefs.edit().putFloat("speed", v).apply();
+            int a = 10 + bar.getProgress();
+            label.setText("Прозрачность: " + (100 - a) + "%");
+            prefs.edit().putInt("ctrlAlpha", a).apply();
+            view.ctrlAlpha = a / 100f;
             view.invalidate();
         };
         apply.run();
@@ -434,18 +572,12 @@ public final class EmuActivity extends Activity implements MainView.Host {
             public void onStopTrackingTouch(android.widget.SeekBar sb) {
             }
         });
-        android.widget.TextView hint = new android.widget.TextView(this);
-        hint.setText("0.2× — замедление, 1× — как настоящий «Специалист», 5× — ускорение");
-        hint.setPadding(0, pad / 2, 0, 0);
         box.addView(label);
         box.addView(bar);
-        box.addView(hint);
-        AlertDialog d = show(new AlertDialog.Builder(this)
-                .setTitle("Скорость эмуляции")
+        show(new AlertDialog.Builder(this)
+                .setTitle("Джойстик и кнопки")
                 .setView(box)
-                .setPositiveButton("Готово", null)
-                .setNeutralButton("1×", null));
-        d.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> bar.setProgress(8));
+                .setPositiveButton("Готово", (d, w) -> showVisualization()));
     }
 
     @Override
@@ -466,7 +598,9 @@ public final class EmuActivity extends Activity implements MainView.Host {
                         + "Пауза: нажмите на экран «Специалиста». Пока открыто меню, эмуляция тоже стоит.\n\n"
                         + "Сохранения: у каждой программы своё. В «Моих программах» значок 💾 — "
                         + "у программы есть сохранение, при запуске можно продолжить с него.\n\n"
-                        + "Скорость: меню → «Скорость», от 0.2× до 5×.\n\n"
+                        + "Замедление: меню → «Замедление», от 1 (реальная скорость) до 100.\n\n"
+                        + "Визуализация памяти: карта всех 64 КБ под экраном, байты вспыхивают при "
+                        + "чтении, записи и исполнении; тап по карте — что это за адрес.\n\n"
                         + "Файлы: программы и сохранения лежат в Android/data/com.alexspec.specialist/files "
                         + "(папки programs и states), их видно с компьютера по USB. "
                         + "Через меню можно экспортировать или импортировать сохранение в любую папку.\n\n"

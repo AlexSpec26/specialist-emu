@@ -19,6 +19,12 @@ final class EmuThread extends Thread {
     final int[] frame = new int[Specialist.WIDTH * Specialist.HEIGHT];
 
     private final int[] back = new int[Specialist.WIDTH * Specialist.HEIGHT];
+    /** Live memory map (MemTrace layout); guarded by itself. */
+    final int[] mapFrame = new int[com.alexspec.specialist.core.MemTrace.MAP_W * com.alexspec.specialist.core.MemTrace.MAP_H];
+    private final int[] mapBack = new int[mapFrame.length];
+    private int frameCount;
+    /** bumped every time mapFrame is refreshed */
+    volatile int mapVersion;
     private final short[] audioBuf = new short[8192];
     private final short[] outBuf = new short[2048];
     private final ConcurrentLinkedQueue<Runnable> queue = new ConcurrentLinkedQueue<>();
@@ -28,7 +34,7 @@ final class EmuThread extends Thread {
     private volatile boolean running = true;
     private volatile boolean paused = true;
     private volatile boolean userPaused;
-    /** Emulation speed relative to the real machine, 0.2 .. 5. */
+    /** Emulation speed relative to the real machine, 0.01 (1/100) .. 1. */
     volatile float speed = 1f;
     volatile boolean sound = true;
     volatile int colorMode = Specialist.COLOR_WHITE;
@@ -141,6 +147,7 @@ final class EmuThread extends Thread {
                 // a queued task (e.g. state load) may have changed the screen
                 if (machine.isRomLoaded()) {
                     machine.render(back, colorMode);
+                    renderMap();
                     publish();
                 }
                 continue;
@@ -154,10 +161,15 @@ final class EmuThread extends Thread {
                 continue;
             }
 
-            float sp = Math.max(0.2f, Math.min(5f, speed));
+            float sp = Math.max(0.01f, Math.min(1f, speed));
             int cycles = Math.round(Specialist.CYCLES_PER_FRAME * sp);
             int samples = machine.run(audioBuf, cycles);
             machine.render(back, colorMode);
+            // the trace clock follows real time, so flashes last the same at any emulation speed
+            if (machine.trace.enabled) {
+                machine.trace.tick();
+                if ((++frameCount & 1) == 0) renderMap(); // 25 Hz is plenty for the map
+            }
             publish();
 
             boolean useAudio = sound && track != null;
@@ -203,6 +215,15 @@ final class EmuThread extends Thread {
             }
             track.release();
         }
+    }
+
+    private void renderMap() {
+        if (!machine.trace.enabled) return;
+        machine.trace.render(machine, mapBack);
+        synchronized (mapFrame) {
+            System.arraycopy(mapBack, 0, mapFrame, 0, mapBack.length);
+        }
+        mapVersion++;
     }
 
     private void publish() {

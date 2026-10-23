@@ -70,7 +70,7 @@ public final class I8080 {
 
     // ---- memory helpers ----
     private int fetch() {
-        int v = bus.read(pc);
+        int v = bus.fetch(pc);
         pc = (pc + 1) & 0xFFFF;
         return v;
     }

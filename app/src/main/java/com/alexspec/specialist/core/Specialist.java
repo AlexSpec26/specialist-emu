@@ -90,6 +90,7 @@ public final class Specialist implements Bus {
 
     /** Clears all memory and resets (cold start). */
     public void hardReset() {
+        progStart = progEnd = -1;
         java.util.Arrays.fill(ram, (byte) 0);
         java.util.Arrays.fill(colorRam, (byte) 0);
         cpu.a = cpu.b = cpu.c = cpu.d = cpu.e = cpu.h = cpu.l = 0;
@@ -100,8 +101,29 @@ public final class Specialist implements Bus {
 
     // ------------------------------------------------------------------ bus
 
+    /** Memory access tracing for the live memory map (off by default). */
+    public final MemTrace trace = new MemTrace();
+
+    /** Byte value without tracing or side effects (memory map, inspector). */
+    public int rawRead(int addr) {
+        if (addr < 0xC000) return ram[addr] & 0xFF;
+        if (addr < 0xF000) return rom[addr - 0xC000] & 0xFF;
+        if (addr >= 0xF800) return ppiRead(addr & 3);
+        return 0xFF;
+    }
+
     @Override
     public int read(int addr) {
+        if (trace.enabled) trace.lastRead[addr] = trace.now;
+        if (addr < 0xC000) return ram[addr] & 0xFF;
+        if (addr < 0xF000) return rom[addr - 0xC000] & 0xFF;
+        if (addr >= 0xF800) return ppiRead(addr & 3);
+        return 0xFF;
+    }
+
+    @Override
+    public int fetch(int addr) {
+        if (trace.enabled) trace.lastExec[addr] = trace.now;
         if (addr < 0xC000) return ram[addr] & 0xFF;
         if (addr < 0xF000) return rom[addr - 0xC000] & 0xFF;
         if (addr >= 0xF800) return ppiRead(addr & 3);
@@ -110,6 +132,7 @@ public final class Specialist implements Bus {
 
     @Override
     public void write(int addr, int value) {
+        if (trace.enabled) trace.lastWrite[addr] = trace.now;
         if (addr < 0xC000) {
             ram[addr] = (byte) value;
             if (addr >= 0x9000) colorRam[addr - 0x9000] = (byte) curColor;
@@ -350,6 +373,9 @@ public final class Specialist implements Bus {
      *
      * @throws IOException if the file is not a valid program image
      */
+    /** Address range of the last loaded program (for the memory inspector), -1 if none. */
+    public volatile int progStart = -1, progEnd = -1;
+
     public RksInfo loadRks(byte[] data, boolean run) throws IOException {
         int p = 0, n = data.length;
         if (n > 0 && (data[0] & 0xFF) == 0xE6) p++;
@@ -382,6 +408,8 @@ public final class Specialist implements Bus {
             cpu.halted = false;
             cpu.pc = beg;
         }
+        progStart = beg;
+        progEnd = end;
         return new RksInfo(beg, end, csOk);
     }
 

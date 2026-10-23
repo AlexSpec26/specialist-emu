@@ -4,6 +4,11 @@ package com.alexspec.specialist.core;
 public interface Bus {
     int read(int addr);
 
+    /** Instruction (opcode or operand) fetch; same as read unless the bus wants to tell them apart. */
+    default int fetch(int addr) {
+        return read(addr);
+    }
+
     void write(int addr, int value);
 
     int in(int port);
