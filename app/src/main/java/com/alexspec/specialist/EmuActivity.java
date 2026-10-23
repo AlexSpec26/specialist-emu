@@ -36,6 +36,8 @@ import java.util.List;
 public final class EmuActivity extends Activity implements MainView.Host {
     private static final int REQ_PROGRAM = 1;
     private static final int REQ_ROM = 2;
+    private static final int REQ_EXPORT_STATE = 3;
+    private static final int REQ_IMPORT_STATE = 4;
     private static final int MAX_FILE = 128 * 1024;
 
     private EmuThread emu;
@@ -99,6 +101,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
                 toast("Не удалось прочитать ПЗУ: " + e.getMessage());
             }
         }
+        migrateStorage();
         emu.start();
         if (!rom.exists()) ui.post(this::askForRom);
     }
@@ -187,8 +190,40 @@ public final class EmuActivity extends Activity implements MainView.Host {
         return new File(getFilesDir(), "autosave.sav");
     }
 
+    /**
+     * Programs and saves live in the app's external folder
+     * (Android/data/com.alexspec.specialist/files), which is visible over USB.
+     */
+    private File dataRoot() {
+        File ext = getExternalFilesDir(null);
+        return ext != null ? ext : getFilesDir();
+    }
+
+    /** One-time move of programs/saves from the old internal location. */
+    private void migrateStorage() {
+        File root = dataRoot();
+        if (root.equals(getFilesDir())) return;
+        for (String sub : new String[]{"programs", "states"}) {
+            File[] old = new File(getFilesDir(), sub).listFiles();
+            if (old == null) continue;
+            File dst = new File(root, sub);
+            //noinspection ResultOfMethodCallIgnored
+            dst.mkdirs();
+            for (File f : old) {
+                File t = new File(dst, f.getName());
+                try {
+                    if (!t.exists()) writeFile(t, readFile(f));
+                    //noinspection ResultOfMethodCallIgnored
+                    f.delete();
+                } catch (IOException e) {
+                    android.util.Log.w("Specialist", "migrate " + f, e);
+                }
+            }
+        }
+    }
+
     private File programsDir() {
-        File d = new File(getFilesDir(), "programs");
+        File d = new File(dataRoot(), "programs");
         //noinspection ResultOfMethodCallIgnored
         d.mkdirs();
         return d;
@@ -200,7 +235,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
 
     /** Quick-save slot belonging to one program (by its file name); "" is the bare monitor. */
     private File stateFile(String prog) {
-        File d = new File(getFilesDir(), "states");
+        File d = new File(dataRoot(), "states");
         //noinspection ResultOfMethodCallIgnored
         d.mkdirs();
         return new File(d, (prog.isEmpty() ? "_monitor" : prog) + ".sav");
@@ -332,6 +367,10 @@ public final class EmuActivity extends Activity implements MainView.Host {
         items.add(st.exists() ? "📥  Загрузить: " + progTitle() + " (" + when(st) + ")"
                 : "📥  Загрузить: " + progTitle() + " — нет сохранения");
         actions.add(this::quickLoad);
+        items.add("📤  Экспорт сохранения…");
+        actions.add(this::exportState);
+        items.add("📦  Импорт сохранения…");
+        actions.add(this::importState);
         items.add(String.format(java.util.Locale.US, "⏱  Скорость: %.1f×…", emu.speed));
         actions.add(this::showSpeed);
         items.add("🔄  Перезапуск (сброс)");
@@ -428,6 +467,9 @@ public final class EmuActivity extends Activity implements MainView.Host {
                         + "Сохранения: у каждой программы своё. В «Моих программах» значок 💾 — "
                         + "у программы есть сохранение, при запуске можно продолжить с него.\n\n"
                         + "Скорость: меню → «Скорость», от 0.2× до 5×.\n\n"
+                        + "Файлы: программы и сохранения лежат в Android/data/com.alexspec.specialist/files "
+                        + "(папки programs и states), их видно с компьютера по USB. "
+                        + "Через меню можно экспортировать или импортировать сохранение в любую папку.\n\n"
                         + "Состояние машины сохраняется автоматически при выходе.")
                 .setPositiveButton("OK", null)
                 );
@@ -678,6 +720,70 @@ public final class EmuActivity extends Activity implements MainView.Host {
         });
     }
 
+    private void exportState() {
+        File f = stateFile();
+        if (!f.exists()) {
+            toast("Для «" + progTitle() + "» сохранения пока нет — сначала «Сохранить»");
+            return;
+        }
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("application/octet-stream");
+        i.putExtra(Intent.EXTRA_TITLE, f.getName());
+        startActivityForResult(i, REQ_EXPORT_STATE);
+    }
+
+    private void importState() {
+        if (!machine.isRomLoaded()) {
+            askForRom();
+            return;
+        }
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        startActivityForResult(i, REQ_IMPORT_STATE);
+    }
+
+    private void onExportChosen(Uri uri) {
+        try (java.io.OutputStream out = getContentResolver().openOutputStream(uri)) {
+            if (out == null) throw new IOException("нет доступа к файлу");
+            out.write(readFile(stateFile()));
+            toast("Сохранение «" + progTitle() + "» экспортировано");
+        } catch (IOException e) {
+            toast("Ошибка: " + e.getMessage());
+        }
+    }
+
+    private void onImportChosen(Uri uri) {
+        final byte[] data;
+        try {
+            data = readUri(uri);
+        } catch (IOException e) {
+            toast("Ошибка: " + e.getMessage());
+            return;
+        }
+        String fname = displayName(uri);
+        String base = fname.toLowerCase(java.util.Locale.ROOT).endsWith(".sav")
+                ? fname.substring(0, fname.length() - 4) : fname;
+        final String prog = "_monitor".equals(base) ? "" : base;
+        emu.post(() -> {
+            try {
+                machine.loadState(data); // validates the file and restores the machine
+                ui.post(() -> {
+                    setProgram(prog);
+                    try {
+                        writeFile(stateFile(prog), data);
+                    } catch (IOException e) {
+                        android.util.Log.w("Specialist", "import copy", e);
+                    }
+                    toast("Импортировано: " + progTitle());
+                });
+            } catch (IOException e) {
+                ui.post(() -> toast(fname + ": это не сохранение эмулятора"));
+            }
+        });
+    }
+
     private void quickLoad() {
         File f = stateFile();
         if (!f.exists()) {
@@ -758,6 +864,10 @@ public final class EmuActivity extends Activity implements MainView.Host {
                 uris.add(data.getData());
             }
             if (!uris.isEmpty()) installRom(uris);
+        } else if (requestCode == REQ_EXPORT_STATE && data.getData() != null) {
+            onExportChosen(data.getData());
+        } else if (requestCode == REQ_IMPORT_STATE && data.getData() != null) {
+            onImportChosen(data.getData());
         } else if (requestCode == REQ_PROGRAM && data.getData() != null) {
             Uri uri = data.getData();
             try {
