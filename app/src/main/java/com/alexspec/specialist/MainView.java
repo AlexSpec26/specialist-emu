@@ -42,6 +42,7 @@ final class MainView extends View {
     private static final int T_CONSUMED = -5;
     private static final int T_SCREEN = -6;
     private static final int T_MAP = -7;
+    private static final int T_PANEL = -8;
     private static final int T_BUTTON = 1000;
     private static final int T_KEY = 2000;
 
@@ -71,15 +72,11 @@ final class MainView extends View {
 
     // geometry
     private final RectF screenRect = new RectF();
-    private final RectF mapRect = new RectF();
     private boolean mapVisible;
-    private final Bitmap mapBmp = Bitmap.createBitmap(com.alexspec.specialist.core.MemTrace.MAP_W,
-            com.alexspec.specialist.core.MemTrace.MAP_H, Bitmap.Config.ARGB_8888);
-    private final int[] mapPix = new int[com.alexspec.specialist.core.MemTrace.MAP_W * com.alexspec.specialist.core.MemTrace.MAP_H];
-    private final Rect mapSrc = new Rect(0, 0, com.alexspec.specialist.core.MemTrace.MAP_W, com.alexspec.specialist.core.MemTrace.MAP_H);
-    private int inspectAddr = -1;
-    private long inspectUntil;
-    private boolean inspectTouching;
+    private float lastUpX, lastUpY;
+    final MapPanel map;
+    /** called when the tutorial is closed (so the owner can re-layout) */
+    Runnable onTutorialClosed;
     private final RectF menuRect = new RectF();
     private final RectF kbdBtnRect = new RectF();
     private final RectF kbdRect = new RectF();
@@ -139,6 +136,31 @@ final class MainView extends View {
         setHapticFeedbackEnabled(true);
         java.util.Arrays.fill(btnCode, SpecKeys.NONE);
         buildKeyboard();
+        map = new MapPanel(emu, new MapPanel.Host() {
+            @Override
+            public void invalidate() {
+                MainView.this.invalidate();
+            }
+
+            @Override
+            public void postInvalidateDelayed(long ms) {
+                MainView.this.postInvalidateDelayed(ms);
+            }
+
+            @Override
+            public void onTutorialClosed() {
+                layoutControls(getWidth(), getHeight());
+                if (onTutorialClosed != null) onTutorialClosed.run();
+            }
+        }, dp);
+    }
+
+    void startTutorial() {
+        releaseAll();
+        setKeyboardVisible(false);
+        map.startTutorial();
+        layoutControls(getWidth(), getHeight());
+        invalidate();
     }
 
     // ------------------------------------------------------------------ keyboard layout
@@ -290,10 +312,16 @@ final class MainView extends View {
             mapVisible = mapOn;
             if (mapVisible) {
                 // memory map right under the toolbar; controls float over it (semi-transparent)
-                mapRect.set(ox, top, ox + w, top + w / 2f);
+                boolean bits = emu.machine.trace.layout == com.alexspec.specialist.core.MemTrace.LAYOUT_BITS;
+                // bits: the 8:1 strip fits the width, the extra height is room for zooming in
+                float mh = bits ? w / 2f : Math.min(w, regionH - 60 * dp);
+                float panelTop = Math.min(top + mh + 6 * dp, bottom - 280 * dp);
+                if (map.isTutorialActive()) mh = Math.max(80 * dp, Math.min(mh, panelTop - 6 * dp - top));
+                map.rect.set(ox, top, ox + w, top + mh);
+                map.panelRect.set(ox + 6 * dp, Math.max(map.rect.bottom + 6 * dp, panelTop), ox + w - 6 * dp, bottom - 6 * dp);
                 float r = w * 0.17f;
-                float free = bottom - mapRect.bottom;
-                float cy = free >= r * 2.4f ? mapRect.bottom + free / 2f : bottom - r * 1.2f;
+                float free = bottom - map.rect.bottom;
+                float cy = free >= r * 2.4f ? map.rect.bottom + free / 2f : bottom - r * 1.2f;
                 joyCx = ox + w * 0.25f;
                 joyCy = cy;
                 joyR = r;
@@ -427,9 +455,12 @@ final class MainView extends View {
         drawUiButton(c, menuRect, "☰", false);
         drawUiButton(c, kbdBtnRect, "⌨", keyboardVisible);
 
-        if (mapVisible) drawMap(c);
+        if (mapVisible) {
+            map.programTitle = title;
+            map.draw(c);
+        }
         if (keyboardVisible) drawKeyboard(c);
-        else drawControls(c);
+        else if (!(mapVisible && map.isTutorialActive())) drawControls(c);
     }
 
     private void drawUiButton(Canvas c, RectF r, String label, boolean active) {
@@ -444,111 +475,6 @@ final class MainView extends View {
     private int ca(int color) {
         int a = (color >>> 24) & 0xFF;
         return ((int) (a * ctrlAlpha) << 24) | (color & 0xFFFFFF);
-    }
-
-    private int mapVersionShown = -1;
-
-    private void drawMap(Canvas c) {
-        int ver = emu.mapVersion;
-        if (ver != mapVersionShown) {
-            mapVersionShown = ver;
-            synchronized (emu.mapFrame) {
-                System.arraycopy(emu.mapFrame, 0, mapPix, 0, mapPix.length);
-            }
-            mapBmp.setPixels(mapPix, 0, com.alexspec.specialist.core.MemTrace.MAP_W, 0, 0,
-                    com.alexspec.specialist.core.MemTrace.MAP_W, com.alexspec.specialist.core.MemTrace.MAP_H);
-        }
-        c.drawBitmap(mapBmp, mapSrc, mapRect, bmpPaint);
-        // thin divider between the two bands (0000-7FFF / 8000-FFFF)
-        fill.setColor(0x553A5BD9);
-        float mid = mapRect.top + mapRect.height() / 2f;
-        c.drawRect(mapRect.left, mid - dp * 0.5f, mapRect.right, mid + dp * 0.5f, fill);
-
-        boolean showInfo = inspectAddr >= 0 && (inspectTouching || System.currentTimeMillis() < inspectUntil);
-        if (!showInfo) return;
-        float sx = mapRect.width() / com.alexspec.specialist.core.MemTrace.MAP_W;
-        float sy = mapRect.height() / com.alexspec.specialist.core.MemTrace.MAP_H;
-        float bx = mapRect.left + com.alexspec.specialist.core.MemTrace.mapX(inspectAddr) * sx;
-        float by = mapRect.top + com.alexspec.specialist.core.MemTrace.mapY(inspectAddr) * sy;
-        stroke.setColor(0xFFFFFFFF);
-        stroke.setStrokeWidth(1.5f * dp);
-        c.drawRect(bx - 2 * dp, by - 2 * dp, bx + 8 * sx + 2 * dp, by + sy + 2 * dp, stroke);
-
-        String[] lines = describe(inspectAddr);
-        text.setTextAlign(Paint.Align.LEFT);
-        text.setTextSize(13 * dp);
-        float lh = 17 * dp, pad = 8 * dp, maxW = 0;
-        for (String l : lines) maxW = Math.max(maxW, text.measureText(l));
-        float bw = Math.min(maxW + 2 * pad, mapRect.width() - 8 * dp);
-        float bh = lines.length * lh + pad * 1.4f;
-        // put the box in the half of the map the finger is NOT in
-        float boxTop = by < mapRect.centerY() ? mapRect.bottom - bh - 4 * dp : mapRect.top + 4 * dp;
-        float boxLeft = Math.max(mapRect.left + 4 * dp, Math.min(bx - bw / 2f, mapRect.right - bw - 4 * dp));
-        fill.setColor(0xE6101018);
-        c.drawRoundRect(boxLeft, boxTop, boxLeft + bw, boxTop + bh, 8 * dp, 8 * dp, fill);
-        for (int i = 0; i < lines.length; i++) {
-            text.setColor(i == 0 ? 0xFFFFFFFF : 0xFFC8C8D0);
-            c.drawText(lines[i], boxLeft + pad, boxTop + pad + (i + 0.8f) * lh, text);
-        }
-        text.setTextAlign(Paint.Align.CENTER);
-        if (!inspectTouching) postInvalidateDelayed(Math.max(16, inspectUntil - System.currentTimeMillis()));
-    }
-
-    private static final String KOI7 = "ЮАБЦДЕФГХИЙКЛМНОПЯРСТУЖВЬЫЗШЭЩЧ";
-
-    /** Human-readable description of one byte for the map inspector. */
-    private String[] describe(int a) {
-        com.alexspec.specialist.core.MemTrace tr = machine.trace;
-        int v = machine.rawRead(a);
-        String bin = String.format("%8s", Integer.toBinaryString(v)).replace(' ', '0');
-        char ch = v >= 0x60 && v < 0x7F ? KOI7.charAt(v - 0x60) : (v >= 0x20 && v < 0x60 ? (char) v : '·');
-        List<String> out = new ArrayList<>();
-        out.add(String.format("%04X:  %02X   %s   «%c»", a, v, bin, ch));
-
-        int sp = machine.cpu.sp;
-        int ps = machine.progStart, pe = machine.progEnd;
-        if (a < 0x9000 && a >= sp - 48 && a <= Math.min(sp + 64, 0x8FFF))
-            out.add(String.format("стек (SP = %04X)", sp));
-        if (ps >= 0 && a >= ps && a <= pe)
-            out.add(String.format("программа %s (%04X–%04X)", title == null || title.isEmpty() ? "" : title, ps, pe));
-        if (a < 0x8F00) {
-            if (ps < 0 || a < ps || a > pe) out.add("ОЗУ (0000–8EFF)");
-        } else if (a < 0x9000) {
-            out.add("ОЗУ: рабочие ячейки монитора (8F00–8FFF)");
-        } else if (a < 0xC000) {
-            int off = a - 0x9000;
-            out.add(String.format("экранная память: x %d–%d, y %d", (off >> 8) * 8, (off >> 8) * 8 + 7, off & 0xFF));
-        } else if (a < 0xF000) {
-            out.add("ПЗУ монитора (C000–EFFF)");
-        } else if (a < 0xF800) {
-            out.add("не подключено (читается FF)");
-        } else {
-            String[] regs = {"порт A — столбцы клавиатуры", "порт B — строки клавиатуры, НР, магнитофон",
-                    "порт C — клавиатура, звук (бит 5)", "регистр управления"};
-            out.add("ВВ55 (F800–FFFF): " + regs[a & 3]);
-        }
-        StringBuilder acc = new StringBuilder();
-        appendAgo(acc, "чтение", tr.lastRead[a], tr.now);
-        appendAgo(acc, "запись", tr.lastWrite[a], tr.now);
-        appendAgo(acc, "исполнение", tr.lastExec[a], tr.now);
-        out.add(acc.length() == 0 ? "обращений не было" : acc.toString());
-        return out.toArray(new String[0]);
-    }
-
-    private static void appendAgo(StringBuilder sb, String what, int stamp, int now) {
-        if (stamp == 0) return;
-        float sec = (now - stamp) / 50f;
-        if (sb.length() > 0) sb.append(", ");
-        if (sec < 0.05f) sb.append(what).append(" сейчас");
-        else sb.append(what).append(String.format(java.util.Locale.US, " %.1f с назад", sec));
-    }
-
-    private void inspectAt(float x, float y) {
-        int mx = (int) ((x - mapRect.left) / mapRect.width() * com.alexspec.specialist.core.MemTrace.MAP_W);
-        int my = (int) ((y - mapRect.top) / mapRect.height() * com.alexspec.specialist.core.MemTrace.MAP_H);
-        int a = com.alexspec.specialist.core.MemTrace.addrAt(mx, my);
-        if (a >= 0) inspectAddr = a;
-        invalidate();
     }
 
     private void drawControls(Canvas c) {
@@ -672,7 +598,9 @@ final class MainView extends View {
             }
             return T_NONE;
         }
-        if (mapVisible && mapRect.contains(x, y)) {
+        if (mapVisible && map.panelContains(x, y)) return T_PANEL;
+        if (mapVisible && map.rect.contains(x, y)) {
+            if (map.isTutorialActive()) return T_MAP;
             // over the map only the controls themselves react, everything else inspects memory
             int bb = hitButton(x, y, 1.0f);
             if (bb >= 0) return T_BUTTON + bb;
@@ -680,6 +608,7 @@ final class MainView extends View {
             if (dx * dx + dy * dy <= joyR * joyR * 1.3f) return T_JOY;
             return T_MAP;
         }
+        if (mapVisible && map.isTutorialActive()) return T_NONE;
         int b = hitButton(x, y, 1.35f);
         if (b >= 0) return T_BUTTON + b;
         if (joyZone.contains(x, y)) return T_JOY;
@@ -727,7 +656,9 @@ final class MainView extends View {
                     int t = pointers.get(id, T_NONE);
                     float x = ev.getX(i), y = ev.getY(i);
                     if (t == T_MAP) {
-                        inspectAt(x, y);
+                        map.move(id, x, y);
+                    } else if (t == T_PANEL) {
+                        map.panelMove(id, x, y);
                     } else if (t == T_JOY && id == joyPointer) {
                         updateJoy(x, y);
                     } else if (t >= T_BUTTON && t < T_KEY) {
@@ -745,11 +676,14 @@ final class MainView extends View {
                 int idx = ev.getActionIndex();
                 int id = ev.getPointerId(idx);
                 int t = pointers.get(id, T_NONE);
+                lastUpX = ev.getX(idx);
+                lastUpY = ev.getY(idx);
                 pointers.delete(id);
                 release(id, t);
                 break;
             }
             case MotionEvent.ACTION_CANCEL:
+                map.cancel();
                 releaseAll();
                 break;
             default:
@@ -768,8 +702,11 @@ final class MainView extends View {
             return;
         }
         if (t == T_MAP) {
-            inspectTouching = true;
-            inspectAt(x, y);
+            map.down(id, x, y);
+            return;
+        }
+        if (t == T_PANEL) {
+            map.panelDown(id, x, y);
             return;
         }
         if (t == T_JOY) {
@@ -818,9 +755,11 @@ final class MainView extends View {
 
     private void release(int id, int t) {
         if (t == T_MAP) {
-            inspectTouching = false;
-            inspectUntil = System.currentTimeMillis() + 4000;
-            invalidate();
+            map.up(id, lastUpX, lastUpY);
+            return;
+        }
+        if (t == T_PANEL) {
+            map.panelUp(id, lastUpX, lastUpY);
             return;
         }
         if (t == T_SCREEN) {

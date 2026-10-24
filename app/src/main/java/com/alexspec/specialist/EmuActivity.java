@@ -312,6 +312,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
                 prefs.getInt("colRW", 0xFFFFE030), prefs.getInt("colX", 0xFF20E8FF));
         machine.trace.setFlashFrames(prefs.getInt("flash", 5));
         view.mapOn = map;
+        machine.trace.layout = prefs.getInt("mapLayout", 0);
         view.ctrlAlpha = prefs.getInt("ctrlAlpha", 100) / 100f;
         view.config = ControlConfig.load(prefs, program);
         view.title = program;
@@ -464,79 +465,102 @@ public final class EmuActivity extends Activity implements MainView.Host {
 
     private void showVisualization() {
         boolean on = prefs.getBoolean("map", false);
+        boolean bytes = prefs.getInt("mapLayout", 0) == com.alexspec.specialist.core.MemTrace.LAYOUT_BYTES;
         int flash = prefs.getInt("flash", 5);
         String[] keys = {"colR", "colW", "colRW", "colX"};
         int[] defs = {0xFF30FF40, 0xFFFF3030, 0xFFFFE030, 0xFF20E8FF};
         String[] what = {"Чтение", "Запись", "Чтение и запись", "Исполнение (команды и операнды)"};
-        String[] items = {
-            "Карта памяти: " + (on ? "ВКЛ" : "выкл"),
-            what[0] + ": " + colorName(prefs.getInt(keys[0], defs[0])),
-            what[1] + ": " + colorName(prefs.getInt(keys[1], defs[1])),
-            what[2] + ": " + colorName(prefs.getInt(keys[2], defs[2])),
-            what[3] + ": " + colorName(prefs.getInt(keys[3], defs[3])),
-            String.format(java.util.Locale.US, "Вспышка: %.1f с", flash / 50f),
-            "Прозрачность джойстика и кнопок: " + (100 - prefs.getInt("ctrlAlpha", 100)) + "%",
-            "Стереть следы обращений",
-            "Как пользоваться",
-        };
+        List<String> items = new ArrayList<>();
+        List<Runnable> acts = new ArrayList<>();
+        items.add("Карта памяти: " + (on ? "ВКЛ" : "выкл"));
+        acts.add(() -> {
+            boolean nv = !on;
+            prefs.edit().putBoolean("map", nv).apply();
+            // joystick over the map is much nicer half-transparent
+            if (nv && !prefs.contains("ctrlAlpha")) prefs.edit().putInt("ctrlAlpha", 50).apply();
+            applySettings();
+            if (nv && view.getWidth() > view.getHeight())
+                toast("Карта памяти показывается в портретной ориентации");
+            if (nv && !prefs.getBoolean("tourOffered", false)) {
+                prefs.edit().putBoolean("tourOffered", true).apply();
+                show(new AlertDialog.Builder(this)
+                        .setTitle("Экскурсия по памяти")
+                        .setMessage("Показать, как устроена память «Специалиста»? Каждая область карты будет "
+                                + "подсвечена и объяснена: ОЗУ, стек, ячейки монитора, экран, ПЗУ и шрифт, порты.\n\n"
+                                + "Экскурсию можно пройти и позже: меню → «Визуализация памяти».")
+                        .setPositiveButton("Показать", (d, w) -> startTour())
+                        .setNegativeButton("Позже", null));
+            } else {
+                showVisualization();
+            }
+        });
+        items.add("Вид карты: " + (bytes ? "байты (1 точка = 1 байт)" : "биты (1 точка = 1 бит)"));
+        acts.add(() -> {
+            prefs.edit().putInt("mapLayout", bytes ? com.alexspec.specialist.core.MemTrace.LAYOUT_BITS
+                    : com.alexspec.specialist.core.MemTrace.LAYOUT_BYTES).apply();
+            applySettings();
+            showVisualization();
+        });
+        items.add("🎓  Экскурсия по памяти");
+        acts.add(this::startTour);
+        for (int i = 0; i < 4; i++) {
+            final int k = i;
+            items.add(what[k] + ": " + colorName(prefs.getInt(keys[k], defs[k])));
+            acts.add(() -> {
+                int cur = prefs.getInt(keys[k], defs[k]);
+                int sel = -1;
+                for (int j = 0; j < COLOR_VALUES.length; j++) if (COLOR_VALUES[j] == cur) sel = j;
+                show(new AlertDialog.Builder(this)
+                        .setTitle(what[k])
+                        .setSingleChoiceItems(COLOR_NAMES, sel, (d2, w) -> {
+                            prefs.edit().putInt(keys[k], COLOR_VALUES[w]).apply();
+                            d2.dismiss();
+                            applySettings();
+                            showVisualization();
+                        }));
+            });
+        }
+        items.add(String.format(java.util.Locale.US, "Вспышка: %.1f с", flash / 50f));
+        acts.add(() -> {
+            String[] names = {"0.1 с", "0.2 с", "0.5 с", "1 с"};
+            int[] vals = {5, 10, 25, 50};
+            int sel = 0;
+            for (int i = 0; i < vals.length; i++) if (vals[i] == flash) sel = i;
+            show(new AlertDialog.Builder(this)
+                    .setTitle("Длительность вспышки")
+                    .setSingleChoiceItems(names, sel, (d2, w) -> {
+                        prefs.edit().putInt("flash", vals[w]).apply();
+                        d2.dismiss();
+                        applySettings();
+                        showVisualization();
+                    }));
+        });
+        items.add("Прозрачность джойстика и кнопок: " + (100 - prefs.getInt("ctrlAlpha", 100)) + "%");
+        acts.add(this::showAlpha);
+        items.add("Стереть следы обращений");
+        acts.add(() -> {
+            emu.post(machine.trace::clear);
+            toast("Следы стёрты");
+        });
         show(new AlertDialog.Builder(this)
                 .setTitle("Визуализация памяти")
-                .setItems(items, (d, which) -> {
-                    if (which == 0) {
-                        boolean nv = !on;
-                        prefs.edit().putBoolean("map", nv).apply();
-                        // joystick over the map is much nicer half-transparent
-                        if (nv && !prefs.contains("ctrlAlpha")) prefs.edit().putInt("ctrlAlpha", 50).apply();
-                        applySettings();
-                        if (nv && view.getWidth() > view.getHeight())
-                            toast("Карта памяти показывается в портретной ориентации");
-                        showVisualization();
-                    } else if (which >= 1 && which <= 4) {
-                        String key = keys[which - 1];
-                        int cur = prefs.getInt(key, defs[which - 1]);
-                        int sel = -1;
-                        for (int i = 0; i < COLOR_VALUES.length; i++) if (COLOR_VALUES[i] == cur) sel = i;
-                        show(new AlertDialog.Builder(this)
-                                .setTitle(what[which - 1])
-                                .setSingleChoiceItems(COLOR_NAMES, sel, (d2, w) -> {
-                                    prefs.edit().putInt(key, COLOR_VALUES[w]).apply();
-                                    d2.dismiss();
-                                    applySettings();
-                                    showVisualization();
-                                }));
-                    } else if (which == 5) {
-                        String[] names = {"0.1 с", "0.2 с", "0.5 с", "1 с"};
-                        int[] vals = {5, 10, 25, 50};
-                        int sel = 0;
-                        for (int i = 0; i < vals.length; i++) if (vals[i] == flash) sel = i;
-                        show(new AlertDialog.Builder(this)
-                                .setTitle("Длительность вспышки")
-                                .setSingleChoiceItems(names, sel, (d2, w) -> {
-                                    prefs.edit().putInt("flash", vals[w]).apply();
-                                    d2.dismiss();
-                                    applySettings();
-                                    showVisualization();
-                                }));
-                    } else if (which == 6) {
-                        showAlpha();
-                    } else if (which == 7) {
-                        emu.post(machine.trace::clear);
-                        toast("Следы стёрты");
-                    } else {
-                        show(new AlertDialog.Builder(this)
-                                .setTitle("Карта памяти")
-                                .setMessage("Под экраном показаны все 64 КБ: один бит — одна точка, байт — полоска "
-                                        + "из 8 точек. Адреса идут сверху вниз столбцами по 256 байт, как в экранной "
-                                        + "памяти «Специалиста»: номер столбца — старший байт адреса. "
-                                        + "Верхняя половина — 0000–7FFF, нижняя — 8000–FFFF.\n\n"
-                                        + "Байты вспыхивают при чтении, записи и исполнении. "
-                                        + "Коснитесь карты — появится адрес, значение и что это за область.\n\n"
-                                        + "Совет: пауза (тап по экрану) и замедление помогают рассмотреть, "
-                                        + "как «шевелится» код.")
-                                .setPositiveButton("OK", (d2, w) -> showVisualization()));
-                    }
-                })
+                .setItems(items.toArray(new String[0]), (d, which) -> acts.get(which).run())
                 .setPositiveButton("Готово", null));
+    }
+
+    private void startTour() {
+        if (!prefs.getBoolean("map", false)) {
+            prefs.edit().putBoolean("map", true).apply();
+            if (!prefs.contains("ctrlAlpha")) prefs.edit().putInt("ctrlAlpha", 50).apply();
+            applySettings();
+        }
+        prefs.edit().putBoolean("tourOffered", true).apply();
+        if (view.getWidth() > view.getHeight()) {
+            toast("Поверните телефон вертикально — карта видна в портретной ориентации");
+            return;
+        }
+        // the map layout must be up to date before zooming to the first step
+        view.post(view::startTutorial);
     }
 
     private void showAlpha() {

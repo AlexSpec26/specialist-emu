@@ -23,6 +23,8 @@ final class EmuThread extends Thread {
     final int[] mapFrame = new int[com.alexspec.specialist.core.MemTrace.MAP_W * com.alexspec.specialist.core.MemTrace.MAP_H];
     private final int[] mapBack = new int[mapFrame.length];
     private int frameCount;
+    /** layout of the picture currently in mapFrame (guarded by mapFrame) */
+    int mapLayout;
     /** bumped every time mapFrame is refreshed */
     volatile int mapVersion;
     private final short[] audioBuf = new short[8192];
@@ -219,9 +221,12 @@ final class EmuThread extends Thread {
 
     private void renderMap() {
         if (!machine.trace.enabled) return;
-        machine.trace.render(machine, mapBack);
+        int layout = machine.trace.layout;
+        machine.trace.render(machine, mapBack, layout);
+        int n = com.alexspec.specialist.core.MemTrace.width(layout) * com.alexspec.specialist.core.MemTrace.height(layout);
         synchronized (mapFrame) {
-            System.arraycopy(mapBack, 0, mapFrame, 0, mapBack.length);
+            System.arraycopy(mapBack, 0, mapFrame, 0, n);
+            mapLayout = layout;
         }
         mapVersion++;
     }
