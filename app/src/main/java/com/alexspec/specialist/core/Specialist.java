@@ -49,6 +49,21 @@ public final class Specialist implements Bus {
     private boolean aIn = true, bIn = true, cLoIn = true, cHiIn = true;
     private int curColor;
     private boolean beeper;
+    /** tape output: port C bit 7 */
+    private boolean tapeOut;
+    /** total emulated CPU cycles (time base for the tape) */
+    private long cycleCount;
+    /** tape input source; null = silence */
+    public volatile TapeInput tapeInput;
+    /** invert the tape input polarity */
+    public volatile boolean tapeInvert;
+    /** listeners for tape output edges (e.g. recording); called on the emulation thread */
+    public interface TapeOutListener {
+        void onTapeEdge(long cycle, boolean level);
+    }
+    public volatile TapeOutListener tapeOutListener;
+    /** loudness of the tape signals in the speaker, 0 = mute */
+    public volatile float tapeOutVolume = 0f, tapeInVolume = 0f;
 
     // keyboard: per column, bit per row; written from UI thread
     private final AtomicIntegerArray keyCols = new AtomicIntegerArray(SpecKeys.COLS);
@@ -57,7 +72,7 @@ public final class Specialist implements Bus {
 
     // audio
     private long sampleAcc;
-    private int winCyc, winHi;
+    private int winCyc, winHi, winTapeOut, winTapeIn;
     private float hpPrevIn, hpPrevOut;
     private short[] audioOut;
     private int audioPos;
@@ -188,7 +203,7 @@ public final class Specialist implements Bus {
             case 1: {
                 if (!bIn) return portB;
                 int rows = rowsForColumns(selectedColumns());
-                return ((~rows & 0x3F) << 2) | (shiftDown ? 0 : 2) | 1;
+                return ((~rows & 0x3F) << 2) | (shiftDown ? 0 : 2) | (tapeBit() ? 1 : 0);
             }
             case 2: {
                 int v = portC & 0xF0;
@@ -231,6 +246,12 @@ public final class Specialist implements Bus {
     private void applyPortC() {
         int eff = cHiIn ? (portC | 0xF0) : portC;
         beeper = (eff & 0x20) != 0;
+        boolean to = (eff & 0x80) != 0;
+        if (to != tapeOut) {
+            tapeOut = to;
+            TapeOutListener l = tapeOutListener;
+            if (l != null) l.onTapeEdge(cycleCount, to);
+        }
         curColor = eff & 0xD0;
     }
 
@@ -295,7 +316,10 @@ public final class Specialist implements Bus {
             int cyc = cpu.step();
             done += cyc;
             winCyc += cyc;
+            cycleCount += cyc;
             if (beeper) winHi += cyc;
+            if (tapeOut) winTapeOut += cyc;
+            if (tapeInVolume > 0 && tapeBit()) winTapeIn += cyc;
             sampleAcc += (long) cyc * SAMPLE_RATE;
             while (sampleAcc >= CPU_HZ) {
                 sampleAcc -= CPU_HZ;
@@ -305,8 +329,14 @@ public final class Specialist implements Bus {
     }
 
     private void emitSample() {
-        float x = winCyc > 0 ? (float) winHi / winCyc : 0f;
-        winCyc = winHi = 0;
+        float x = 0f;
+        if (winCyc > 0) {
+            x = (float) winHi / winCyc;
+            // tape signals go to the speaker too, like the real machine's tape monitor
+            if (tapeOutVolume > 0) x += tapeOutVolume * winTapeOut / winCyc;
+            if (tapeInVolume > 0) x += tapeInVolume * winTapeIn / winCyc;
+        }
+        winCyc = winHi = winTapeOut = winTapeIn = 0;
         // DC-blocking high-pass so a constant level is silent
         float y = x - hpPrevIn + 0.995f * hpPrevOut;
         hpPrevIn = x;
@@ -317,6 +347,17 @@ public final class Specialist implements Bus {
             if (s < -32768f) s = -32768f;
             audioOut[audioPos++] = (short) s;
         }
+    }
+
+    /** current tape input bit as seen on port B bit 0 */
+    private boolean tapeBit() {
+        TapeInput in = tapeInput;
+        if (in == null) return true; // no tape: line idles high, as before
+        return in.level(cycleCount) != tapeInvert;
+    }
+
+    public long getCycleCount() {
+        return cycleCount;
     }
 
     // ------------------------------------------------------------------ video

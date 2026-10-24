@@ -64,6 +64,8 @@ final class MainView extends View {
     float speed = 1f;
     /** live memory map under the screen (portrait only) */
     boolean mapOn;
+    /** live tape input (microphone), for the level indicator; null when off */
+    com.alexspec.specialist.core.TapeDecoder tape;
     /** opacity of joystick and buttons, 0.1 .. 1 */
     float ctrlAlpha = 1f;
 
@@ -193,6 +195,7 @@ final class MainView extends View {
         if (keyboardVisible == v) return;
         releaseAll();
         keyboardVisible = v;
+        layoutControls(getWidth(), getHeight());
         invalidate();
     }
 
@@ -333,8 +336,11 @@ final class MainView extends View {
                 joyR = Math.min(w * 0.21f, regionH * 0.32f);
                 layoutButtons(ox + w * 0.73f, cy, Math.min(w * 0.2f, regionH * 0.3f));
             }
-            float rowH = Math.min(regionH / rows.size(), 60 * dp);
+            // low keys (roughly square), so the memory map stays visible above the keyboard
+            float rowH = Math.min(regionH / rows.size(), (mapVisible ? 34 : 46) * dp);
             kbdRect.set(ox, bottom - rowH * rows.size() - 6 * dp, ox + w, bottom);
+            if (mapVisible && keyboardVisible && map.rect.bottom > kbdRect.top - 4 * dp)
+                map.rect.bottom = Math.max(map.rect.top + 40 * dp, kbdRect.top - 4 * dp);
         } else {
             float sw = Math.min(h * 1.5f, w * 0.64f);
             float sh = sw / 1.5f;
@@ -421,6 +427,7 @@ final class MainView extends View {
             c.drawText("нажмите на экран, чтобы продолжить", screenRect.centerX(),
                     screenRect.centerY() + screenRect.height() * 0.12f, text);
         }
+        if (tape != null) drawTapeIndicator(c);
         if (Math.abs(speed - 1f) > 0.001f) {
             String sp = "1/" + Math.round(1f / speed);
             text.setTextSize(13 * dp);
@@ -469,6 +476,31 @@ final class MainView extends View {
         text.setColor(Color.WHITE);
         text.setTextSize(r.height() * 0.5f);
         c.drawText(label, r.centerX(), r.centerY() + r.height() * 0.18f, text);
+    }
+
+    /** cassette indicator: input level bar and a "signal" lamp */
+    private void drawTapeIndicator(Canvas c) {
+        float x = screenRect.left + 6 * dp, y = screenRect.top + 6 * dp;
+        float w = 74 * dp, h = 20 * dp;
+        fill.setColor(0xCC101018);
+        c.drawRoundRect(x, y, x + w, y + h, 6 * dp, 6 * dp, fill);
+        text.setTextAlign(Paint.Align.LEFT);
+        text.setTextSize(12 * dp);
+        text.setColor(Color.WHITE);
+        c.drawText("📼", x + 4 * dp, y + 15 * dp, text);
+        text.setTextAlign(Paint.Align.CENTER);
+        // level: -50 dBFS .. 0 dBFS
+        float p = tape.peak();
+        float db = p > 1e-5f ? (float) (20 * Math.log10(p)) : -100f;
+        float lvl = Math.max(0f, Math.min(1f, (db + 50f) / 50f));
+        float bx = x + 24 * dp, bw = 32 * dp, by = y + 7 * dp, bh = 6 * dp;
+        fill.setColor(0xFF33333D);
+        c.drawRect(bx, by, bx + bw, by + bh, fill);
+        fill.setColor(lvl > 0.92f ? 0xFFFF4040 : lvl > 0.45f ? 0xFF40E060 : 0xFFE0C040);
+        c.drawRect(bx, by, bx + bw * lvl, by + bh, fill);
+        boolean signal = tape.edgesPerSecond() > 500;
+        fill.setColor(signal ? 0xFF40FF60 : 0xFF404048);
+        c.drawCircle(x + w - 8 * dp, y + h / 2f, 4 * dp, fill);
     }
 
     /** applies the user's control opacity to a colour */
@@ -553,19 +585,18 @@ final class MainView extends View {
                 String sec = SpecKeys.label2(k.code);
                 boolean letterish = main.length() == 1;
                 text.setColor(Color.WHITE);
-                float ts = Math.min(k.r.height() * (letterish ? 0.5f : 0.34f), (letterish ? 22 : 15) * dp);
+                float ts = Math.min(k.r.height() * (letterish ? 0.5f : 0.34f), (letterish ? 19 : 13) * dp);
                 text.setTextSize(ts);
                 float tw = text.measureText(main);
                 if (tw > k.r.width() * 0.84f) text.setTextSize(ts * k.r.width() * 0.84f / tw);
-                float cx = sec.isEmpty() ? k.r.centerX() : k.r.left + k.r.width() * 0.4f;
-                float cy = sec.isEmpty() ? k.r.centerY() + text.getTextSize() * 0.36f
-                        : k.r.top + k.r.height() * 0.48f + text.getTextSize() * 0.2f;
+                float cx = sec.isEmpty() ? k.r.centerX() : k.r.left + k.r.width() * 0.42f;
+                float cy = k.r.centerY() + text.getTextSize() * 0.36f;
                 c.drawText(main, cx, cy, text);
                 if (!sec.isEmpty()) {
                     text.setColor(0xFFFF6A5A);
-                    text.setTextSize(Math.min(k.r.height() * 0.33f, 14 * dp));
+                    text.setTextSize(Math.min(k.r.height() * 0.24f, 9 * dp));
                     text.setTextAlign(Paint.Align.RIGHT);
-                    c.drawText(sec, k.r.right - 3 * dp, k.r.bottom - 4 * dp, text);
+                    c.drawText(sec, k.r.right - 2 * dp, k.r.bottom - 2.5f * dp, text);
                     text.setTextAlign(Paint.Align.CENTER);
                 }
             }
@@ -596,6 +627,8 @@ final class MainView extends View {
                 }
                 if (best != null && bestD < 100 * dp * dp) return T_KEY + best.code;
             }
+            // the map stays usable (zoom, drag, inspect) while the keyboard is open
+            if (mapVisible && map.rect.contains(x, y)) return T_MAP;
             return T_NONE;
         }
         if (mapVisible && map.panelContains(x, y)) return T_PANEL;

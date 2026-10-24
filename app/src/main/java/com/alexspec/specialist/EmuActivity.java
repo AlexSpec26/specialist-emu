@@ -37,6 +37,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
     private static final int REQ_PROGRAM = 1;
     private static final int REQ_ROM = 2;
     private static final int REQ_EXPORT_STATE = 3;
+    private static final int REQ_MIC = 5;
     private static final int REQ_IMPORT_STATE = 4;
     private static final int MAX_FILE = 128 * 1024;
 
@@ -51,6 +52,8 @@ public final class EmuActivity extends Activity implements MainView.Host {
     private int pickSlot = -1;
     private final SparseIntArray physKeys = new SparseIntArray();
     private int openDialogs;
+    private final MicTape mic = new MicTape();
+    private boolean resumed;
     private boolean tapPaused;
 
     // ------------------------------------------------------------------ lifecycle
@@ -109,12 +112,16 @@ public final class EmuActivity extends Activity implements MainView.Host {
     @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
         hideSystemBars();
         emu.setPaused(false);
+        updateMic();
     }
 
     @Override
     protected void onPause() {
+        resumed = false;
+        updateMic();
         view.releaseAll();
         machine.releaseAllKeys();
         if (machine.isRomLoaded()) {
@@ -302,13 +309,19 @@ public final class EmuActivity extends Activity implements MainView.Host {
         emu.colorMode = prefs.getInt("color", Specialist.COLOR_WHITE);
         emu.sound = prefs.getBoolean("sound", true);
         int slow = Math.max(1, Math.min(100, prefs.getInt("slow", 1)));
+        // tape input must run in real time: the microphone does not slow down
+        if (prefs.getBoolean("micOn", false)) slow = 1;
         emu.speed = 1f / slow;
         view.speed = 1f / slow;
+        // tape (магнитофон)
+        machine.tapeOutVolume = prefs.getBoolean("tapeOutSnd", true) ? 0.5f : 0f;
+        machine.tapeInVolume = prefs.getBoolean("tapeHear", false) ? 0.35f : 0f;
+        machine.tapeInvert = prefs.getBoolean("tapeInv", false);
         // memory visualisation
         boolean map = prefs.getBoolean("map", false);
         if (map && !machine.trace.enabled) machine.trace.clear();
         machine.trace.enabled = map;
-        machine.trace.setColors(prefs.getInt("colR", 0xFF30FF40), prefs.getInt("colW", 0xFFFF3030),
+        machine.trace.setColors(prefs.getInt("colR", 0xFF30FF40), prefs.getInt("colW2", 0xFFFF2A9E),
                 prefs.getInt("colRW", 0xFFFFE030), prefs.getInt("colX", 0xFF20E8FF));
         machine.trace.setFlashFrames(prefs.getInt("flash", 5));
         view.mapOn = map;
@@ -384,6 +397,8 @@ public final class EmuActivity extends Activity implements MainView.Host {
         int slowNow = Math.round(1f / emu.speed);
         items.add(slowNow <= 1 ? "⏱  Замедление: нет (реальная скорость)…" : "⏱  Замедление: в " + slowNow + " раз…");
         actions.add(this::showSpeed);
+        items.add(prefs.getBoolean("micOn", false) ? "📼  Магнитофон (вход с микрофона ВКЛ)…" : "📼  Магнитофон…");
+        actions.add(this::showTape);
         items.add("🔬  Визуализация памяти…");
         actions.add(this::showVisualization);
         items.add("🔄  Перезапуск (сброс)");
@@ -453,9 +468,9 @@ public final class EmuActivity extends Activity implements MainView.Host {
             d.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
     }
 
-    private static final String[] COLOR_NAMES = {"зелёный", "красный", "жёлтый", "голубой", "синий",
+    private static final String[] COLOR_NAMES = {"зелёный", "красный", "малиновый", "жёлтый", "голубой", "синий",
             "пурпурный", "оранжевый", "белый"};
-    private static final int[] COLOR_VALUES = {0xFF30FF40, 0xFFFF3030, 0xFFFFE030, 0xFF20E8FF, 0xFF4070FF,
+    private static final int[] COLOR_VALUES = {0xFF30FF40, 0xFFFF3030, 0xFFFF2A9E, 0xFFFFE030, 0xFF20E8FF, 0xFF4070FF,
             0xFFFF40FF, 0xFFFF9020, 0xFFFFFFFF};
 
     private static String colorName(int c) {
@@ -463,12 +478,114 @@ public final class EmuActivity extends Activity implements MainView.Host {
         return String.format("#%06X", c & 0xFFFFFF);
     }
 
+    // ------------------------------------------------------------------ tape
+
+    private void updateMic() {
+        boolean want = resumed && prefs.getBoolean("micOn", false);
+        if (want && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQ_MIC);
+            return;
+        }
+        if (want && !mic.isRunning()) {
+            if (mic.start()) {
+                machine.tapeInput = mic.decoder;
+            } else {
+                toast("Не удалось открыть микрофон");
+                prefs.edit().putBoolean("micOn", false).apply();
+                applySettings();
+            }
+        } else if (!want && mic.isRunning()) {
+            machine.tapeInput = null;
+            mic.stop();
+        }
+        view.tape = mic.isRunning() ? mic.decoder : null;
+        view.invalidate();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQ_MIC) return;
+        if (grantResults.length > 0 && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            updateMic();
+        } else {
+            prefs.edit().putBoolean("micOn", false).apply();
+            applySettings();
+            toast("Без доступа к микрофону загрузка с магнитофона невозможна");
+        }
+    }
+
+    private void showTape() {
+        boolean micOn = prefs.getBoolean("micOn", false);
+        boolean hear = prefs.getBoolean("tapeHear", false);
+        boolean outSnd = prefs.getBoolean("tapeOutSnd", true);
+        boolean inv = prefs.getBoolean("tapeInv", false);
+        String[] items = {
+            "Вход с микрофона: " + (micOn ? "ВКЛ" : "выкл"),
+            "Слышать входной сигнал: " + (hear ? "да" : "нет"),
+            "Запись на ленту — звук в динамик: " + (outSnd ? "да" : "нет"),
+            "Полярность входа: " + (inv ? "обратная" : "прямая"),
+            "Как загрузить и записать",
+        };
+        show(new AlertDialog.Builder(this)
+                .setTitle("Магнитофон")
+                .setItems(items, (d, which) -> {
+                    switch (which) {
+                        case 0:
+                            prefs.edit().putBoolean("micOn", !micOn).apply();
+                            applySettings();
+                            updateMic();
+                            if (!micOn) toast("Вход с микрофона включён; замедление отключено на время загрузки");
+                            break;
+                        case 1:
+                            prefs.edit().putBoolean("tapeHear", !hear).apply();
+                            applySettings();
+                            break;
+                        case 2:
+                            prefs.edit().putBoolean("tapeOutSnd", !outSnd).apply();
+                            applySettings();
+                            break;
+                        case 3:
+                            prefs.edit().putBoolean("tapeInv", !inv).apply();
+                            applySettings();
+                            break;
+                        default:
+                            show(new AlertDialog.Builder(this)
+                                    .setTitle("Магнитофон")
+                                    .setMessage("ЗАГРУЗКА С КАССЕТЫ (или с другого устройства)\n"
+                                            + "1. Включите «Вход с микрофона».\n"
+                                            + "2. В мониторе наберите I и ВК. На вопрос «ИМЯ ФАЙЛА ?» нажмите ВК "
+                                            + "(загрузить первый найденный файл) или наберите имя.\n"
+                                            + "3. Включите воспроизведение. Телефон — близко к динамику, громкость "
+                                            + "70–100 %, вокруг тихо. Лучше всего — кабель с выхода магнитофона "
+                                            + "на вход гарнитуры телефона.\n"
+                                            + "4. В углу экрана индикатор: полоска — уровень, зелёная точка — есть "
+                                            + "сигнал ленты. После загрузки монитор покажет контрольную сумму "
+                                            + "и адреса; затем G и ВК — запуск (или G с адресом).\n\n"
+                                            + "Если не грузится: поменяйте громкость, попробуйте «Полярность входа: "
+                                            + "обратная», уберите шумы. Звук фильтруется (полоса 150 Гц – 6 кГц, "
+                                            + "автоматический уровень, подавление шума в паузах).\n\n"
+                                            + "ЗАПИСЬ НА ЛЕНТУ\n"
+                                            + "Наберите O начало,конец ВК (например O0000,0A43), затем имя файла и ВК. "
+                                            + "Сигнал записи звучит из динамика (если включено «звук в динамик») — "
+                                            + "запишите его диктофоном или на кассету через кабель. "
+                                            + "Записывайте на реальной скорости (замедление 1).\n\n"
+                                            + "Используется источник звука: " + (mic.isRunning() ? mic.sourceName : "—"))
+                                    .setPositiveButton("OK", (d2, w2) -> showTape()));
+                            return;
+                    }
+                    showTape();
+                })
+                .setPositiveButton("Готово", null));
+    }
+
     private void showVisualization() {
         boolean on = prefs.getBoolean("map", false);
         boolean bytes = prefs.getInt("mapLayout", 0) == com.alexspec.specialist.core.MemTrace.LAYOUT_BYTES;
         int flash = prefs.getInt("flash", 5);
-        String[] keys = {"colR", "colW", "colRW", "colX"};
-        int[] defs = {0xFF30FF40, 0xFFFF3030, 0xFFFFE030, 0xFF20E8FF};
+        String[] keys = {"colR", "colW2", "colRW", "colX"};
+        int[] defs = {0xFF30FF40, 0xFFFF2A9E, 0xFFFFE030, 0xFF20E8FF};
         String[] what = {"Чтение", "Запись", "Чтение и запись", "Исполнение (команды и операнды)"};
         List<String> items = new ArrayList<>();
         List<Runnable> acts = new ArrayList<>();

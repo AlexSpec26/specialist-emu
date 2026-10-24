@@ -63,6 +63,7 @@ final class MapPanel {
     private long lastTapTime;
     private float lastTapX, lastTapY, downX, downY;
     private boolean moved;
+    private float dragMx, dragMy;
 
     // inspector
     private int inspectAddr = -1;
@@ -576,12 +577,13 @@ final class MapPanel {
             g0Mx = toMapX(mx);
             g0My = toMapY(my);
         } else if (ptrs.size() == 1) {
+            // one finger: drag the map; a tap without movement shows what is under it
             gesture = false;
             moved = false;
             downX = x;
             downY = y;
-            inspectTouching = true;
-            inspectAt(x, y);
+            dragMx = toMapX(x);
+            dragMy = toMapY(y);
         }
         host.invalidate();
     }
@@ -601,8 +603,11 @@ final class MapPanel {
             cx = g0Mx - (mx - rect.centerX()) / scale();
             cy = g0My - (my - rect.centerY()) / scale();
             clampView();
-        } else if (!gesture) {
-            inspectAt(x, y);
+        } else if (!gesture && moved) {
+            // keep the map point under the finger
+            cx = dragMx - (x - rect.centerX()) / scale();
+            cy = dragMy - (y - rect.centerY()) / scale();
+            clampView();
         }
         host.invalidate();
     }
@@ -615,8 +620,11 @@ final class MapPanel {
             return;
         }
         inspectTouching = false;
-        inspectUntil = System.currentTimeMillis() + 4000;
         long now = System.currentTimeMillis();
+        if (!moved) {
+            inspectAt(x, y);
+            inspectUntil = now + 4000;
+        }
         if (!moved && now - lastTapTime < 300 && Math.hypot(x - lastTapX, y - lastTapY) < 40 * dp) {
             // double tap: zoom in around the point / back to whole map
             if (zoom > 1.5f) {

@@ -68,14 +68,14 @@ public final class MemTrace {
     private int[][] palOn, palOff;
 
     public MemTrace() {
-        setColors(0xFF30FF40, 0xFFFF3030, 0xFFFFE030, 0xFF20E8FF);
+        setColors(0xFF30FF40, 0xFFFF2A9E, 0xFFFFE030, 0xFF20E8FF);
     }
 
     public synchronized void setColors(int read, int write, int rw, int exec) {
         int[] c = {0, read, write, rw, exec};
         for (int k = 1; k < 5; k++) {
             bright[k] = c[k];
-            dark[k] = scale(c[k], 0.30f);
+            dark[k] = scale(c[k], 0.55f); // 0 bits glow too, so a flash is visible on dark data
         }
         rebuild();
     }
