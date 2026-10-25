@@ -4,7 +4,7 @@
 - Branch: main (короткие ветки на задачу пока не заводились — см. OPS-002)
 - Last pushed commit: см. `git log -1` (коммит «ROM-001 ...»)
 - Open PR: нет
-- Active backlog IDs: ROM-Q3 (ждёт владельца), затем ROM-003
+- Active backlog IDs: ROM-003
 - User-approved goal for this session: ядро и совместимость (сделано), память проекта (сделано),
   ключ подписи в секретах (OPS-001, сделано), «давай» → ROM-001, ROM-002 (сделаны)
 
@@ -33,10 +33,10 @@
 - Принятые: ADR-002…015.
 
 ## Exact next steps (ordered)
-1. Дождаться ответа владельца по ROM-Q3 (что урезать: места ~2,2 КБ на ~4,4 КБ планов).
-2. ROM-003 «Отладка» (дизассемблер 8080 — таблицы можно взять из `shell/tools/dis80.py`).
+1. ROM-003 «Отладка» без дизассемблера (ADR-016).
+2. ROM-006 «Магнитофон», ROM-007 «Монитор», ROM-008 «Редактор».
 3. Перед каждым коммитом ROM: собрать, `ShellSmoke`, `ShellTiming`, по возможности
    `ShellCompat` (игры — см. ARCHITECTURE «Внешние тестовые ресурсы»).
 
 ## Questions requiring the user's approval
-- ROM-Q1, ROM-Q2, ROM-Q3.
+- ROM-Q1, ROM-Q2.
