@@ -28,6 +28,8 @@ final class MainView extends View {
 
         void onScreenTapped();
 
+        void onStep(int kind);
+
         void onKeyboardToggled(boolean visible);
 
         void onKeyPicked(int code);
@@ -45,6 +47,9 @@ final class MainView extends View {
     private static final int T_PANEL = -8;
     private static final int T_BUTTON = 1000;
     private static final int T_KEY = 2000;
+    private static final int T_STEP = 3000;
+    private static final String[] STEP_LABELS = {"−1 с", "−1 команда", "+1 команда", "+1 с"};
+    private final RectF[] stepRects = {new RectF(), new RectF(), new RectF(), new RectF()};
 
     private static final int DIR_UP = 1, DIR_DOWN = 2, DIR_LEFT = 4, DIR_RIGHT = 8;
 
@@ -61,7 +66,8 @@ final class MainView extends View {
     String title = "";
     /** Shown as an overlay; the emulation itself is paused by the activity. */
     boolean paused;
-    float speed = 1f;
+    String speedBadge;
+    boolean timeBusy;
     /** live memory map under the screen (portrait only) */
     boolean mapOn;
     /** live tape input (microphone), for the level indicator; null when off */
@@ -421,15 +427,16 @@ final class MainView extends View {
             c.drawRect(screenRect, fill);
             text.setColor(Color.WHITE);
             text.setTextSize(Math.min(screenRect.height() * 0.14f, 40 * dp));
-            c.drawText("❚❚  ПАУЗА", screenRect.centerX(), screenRect.centerY(), text);
+            c.drawText(timeBusy ? "Перемотка…" : "❚❚  ПАУЗА", screenRect.centerX(), screenRect.centerY(), text);
             text.setTextSize(Math.min(screenRect.height() * 0.06f, 15 * dp));
             text.setColor(0xFFBBBBC5);
             c.drawText("нажмите на экран, чтобы продолжить", screenRect.centerX(),
                     screenRect.centerY() + screenRect.height() * 0.12f, text);
         }
+        if (paused && pickPrompt == null && machine.isRomLoaded()) drawStepButtons(c);
         if (tape != null) drawTapeIndicator(c);
-        if (Math.abs(speed - 1f) > 0.001f) {
-            String sp = "1/" + Math.round(1f / speed);
+        if (speedBadge != null) {
+            String sp = speedBadge;
             text.setTextSize(13 * dp);
             float tw = text.measureText(sp) + 12 * dp;
             fill.setColor(0xCC3A5BD9);
@@ -603,11 +610,42 @@ final class MainView extends View {
         }
     }
 
+    private void layoutStepButtons() {
+        float h = Math.min(44 * dp, screenRect.height() * 0.16f);
+        float gap = 6 * dp;
+        float w = (screenRect.width() - gap * 5) / 4f;
+        float y = screenRect.bottom - h - gap;
+        for (int i = 0; i < 4; i++) {
+            float x = screenRect.left + gap + i * (w + gap);
+            stepRects[i].set(x, y, x + w, y + h);
+        }
+    }
+
+    private void drawStepButtons(Canvas c) {
+        layoutStepButtons();
+        text.setColor(Color.WHITE);
+        text.setTextSize(Math.min(screenRect.height() * 0.05f, 13 * dp));
+        c.drawText(String.format(java.util.Locale.US, "История: %.1f с", emu.historySeconds),
+                screenRect.centerX(), stepRects[0].top - 5 * dp, text);
+        for (int i = 0; i < 4; i++) {
+            RectF r = stepRects[i];
+            fill.setColor(timeBusy ? 0xDD454550 : 0xDD2A3A80);
+            c.drawRoundRect(r, 9 * dp, 9 * dp, fill);
+            text.setColor(Color.WHITE);
+            text.setTextSize(Math.min(r.height() * 0.42f, 16 * dp));
+            c.drawText(STEP_LABELS[i], r.centerX(), r.centerY() + text.getTextSize() * 0.36f, text);
+        }
+    }
+
     // ------------------------------------------------------------------ touch
 
     private int hitTest(float x, float y) {
         if (inflate(menuRect, 8 * dp).contains(x, y)) return T_MENU;
         if (inflate(kbdBtnRect, 8 * dp).contains(x, y)) return T_KBD;
+        if (paused && pickPrompt == null && machine.isRomLoaded()) {
+            layoutStepButtons();
+            for (int i = 0; i < 4; i++) if (stepRects[i].contains(x, y)) return T_STEP + i;
+        }
         if (screenRect.contains(x, y) && !(keyboardVisible && kbdRect.contains(x, y))) return T_SCREEN;
         if (keyboardVisible) {
             if (kbdRect.contains(x, y)) {
@@ -730,6 +768,11 @@ final class MainView extends View {
     }
 
     private void press(int id, int t, float x, float y) {
+        if (t >= T_STEP) {
+            haptic();
+            if (!timeBusy) host.onStep(t - T_STEP);
+            return;
+        }
         if (t == T_MENU || t == T_KBD || t == T_SCREEN) {
             haptic();
             return;
@@ -787,6 +830,7 @@ final class MainView extends View {
     }
 
     private void release(int id, int t) {
+        if (t >= T_STEP) return;
         if (t == T_MAP) {
             map.up(id, lastUpX, lastUpY);
             return;

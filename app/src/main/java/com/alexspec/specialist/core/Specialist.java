@@ -68,6 +68,13 @@ public final class Specialist implements Bus {
     // keyboard: per column, bit per row; written from UI thread
     private final AtomicIntegerArray keyCols = new AtomicIntegerArray(SpecKeys.COLS);
     private volatile boolean shiftDown;
+    private volatile long keyVersion;
+    private long sampledKeyVersion = -1;
+    final int[] sampledKeys = new int[SpecKeys.COLS];
+    boolean sampledShift;
+    private boolean executingInstruction;
+    long instructions;
+    private final ExecutionHistory history = new ExecutionHistory(this);
     private final int[] pressCount = new int[SpecKeys.COUNT];
 
     // audio
@@ -87,6 +94,7 @@ public final class Specialist implements Bus {
 
     /** Loads a monitor ROM image (up to 12 KB) mapped at C000. */
     public void loadRom(byte[] data) {
+        clearHistory();
         java.util.Arrays.fill(rom, (byte) 0xFF);
         System.arraycopy(data, 0, rom, 0, Math.min(data.length, ROM_SIZE));
         romLoaded = true;
@@ -97,6 +105,7 @@ public final class Specialist implements Bus {
     }
 
     public void reset() {
+        clearHistory();
         cpu.reset(START_ADDR);
         aIn = bIn = cLoIn = cHiIn = true;
         portA = portB = portC = 0;
@@ -147,6 +156,7 @@ public final class Specialist implements Bus {
 
     @Override
     public void write(int addr, int value) {
+        if (!executingInstruction) clearHistory();
         if (trace.enabled) trace.lastWrite[addr] = trace.now;
         if (addr < 0xC000) {
             ram[addr] = (byte) value;
@@ -181,7 +191,7 @@ public final class Specialist implements Bus {
     private int rowsForColumns(int cols) {
         int rows = 0;
         for (int j = 0; j < SpecKeys.COLS; j++)
-            if ((cols & (1 << j)) != 0) rows |= keyCols.get(j);
+            if ((cols & (1 << j)) != 0) rows |= executingInstruction ? sampledKeys[j] : keyCols.get(j);
         return rows;
     }
 
@@ -189,7 +199,7 @@ public final class Specialist implements Bus {
         int cols = 0;
         if (rows == 0) return 0;
         for (int j = 0; j < SpecKeys.COLS; j++)
-            if ((keyCols.get(j) & rows) != 0) cols |= 1 << j;
+            if (((executingInstruction ? sampledKeys[j] : keyCols.get(j)) & rows) != 0) cols |= 1 << j;
         return cols;
     }
 
@@ -203,7 +213,7 @@ public final class Specialist implements Bus {
             case 1: {
                 if (!bIn) return portB;
                 int rows = rowsForColumns(selectedColumns());
-                return ((~rows & 0x3F) << 2) | (shiftDown ? 0 : 2) | (tapeBit() ? 1 : 0);
+                return ((~rows & 0x3F) << 2) | ((executingInstruction ? sampledShift : shiftDown) ? 0 : 2) | (tapeBit() ? 1 : 0);
             }
             case 2: {
                 int v = portC & 0xF0;
@@ -271,6 +281,7 @@ public final class Specialist implements Bus {
         java.util.Arrays.fill(pressCount, 0);
         for (int j = 0; j < SpecKeys.COLS; j++) keyCols.set(j, 0);
         shiftDown = false;
+        keyVersion++;
     }
 
     public boolean isKeyDown(int code) {
@@ -282,6 +293,7 @@ public final class Specialist implements Bus {
     private void setKey(int code, boolean down) {
         if (code == SpecKeys.SHIFT) {
             shiftDown = down;
+            keyVersion++;
             return;
         }
         int col = code / SpecKeys.ROWS, bit = 1 << (code % SpecKeys.ROWS);
@@ -289,6 +301,7 @@ public final class Specialist implements Bus {
         do {
             v = keyCols.get(col);
         } while (!keyCols.compareAndSet(col, v, down ? (v | bit) : (v & ~bit)));
+        keyVersion++;
     }
 
     // ------------------------------------------------------------------ execution
@@ -311,10 +324,17 @@ public final class Specialist implements Bus {
     }
 
     public void runCycles(int cycles) {
-        int done = 0;
-        while (done < cycles) {
+        long end = cycleCount + Math.max(0, cycles);
+        while (cycleCount < end) stepInstruction();
+    }
+
+    /** Exactly one 8080 instruction; a halted CPU advances one four-clock idle interval. */
+    public void stepInstruction() {
+        history.beforeInstruction();
+        executingInstruction = true;
+        try {
             int cyc = cpu.step();
-            done += cyc;
+            instructions++;
             winCyc += cyc;
             cycleCount += cyc;
             if (beeper) winHi += cyc;
@@ -325,8 +345,40 @@ public final class Specialist implements Bus {
                 sampleAcc -= CPU_HZ;
                 emitSample();
             }
+        } finally {
+            executingInstruction = false;
         }
     }
+
+    /** Whole instructions, stopping at the first boundary at/after the requested time. */
+    public void forward(long cycles) {
+        long end = cycleCount + Math.max(0, cycles);
+        while (cycleCount < end) stepInstruction();
+    }
+
+    public long getInstructionCount() { return instructions; }
+    public boolean backInstructions(long count) { return history.back(count, false); }
+    public boolean backTime(long cycles) { return history.back(cycles, true); }
+    public float historySeconds() { return history.seconds(); }
+    public void clearHistory() {
+        history.clear();
+        sampledKeyVersion = -1;
+    }
+
+    /** Live external sources and recording callbacks cannot be replayed safely. */
+    public boolean canRewind() { return tapeInput == null && tapeOutListener == null; }
+
+    boolean sampleInputs() {
+        if (sampledKeyVersion == keyVersion) return false;
+        synchronized (this) {
+            for (int j = 0; j < sampledKeys.length; j++) sampledKeys[j] = keyCols.get(j);
+            sampledShift = shiftDown;
+            sampledKeyVersion = keyVersion;
+        }
+        return true;
+    }
+
+    void useLiveInputsNext() { sampledKeyVersion = -1; }
 
     private void emitSample() {
         float x = 0f;
@@ -451,13 +503,14 @@ public final class Specialist implements Bus {
         }
         progStart = beg;
         progEnd = end;
+        clearHistory();
         return new RksInfo(beg, end, csOk);
     }
 
     // ------------------------------------------------------------------ save states
 
     private static final int STATE_MAGIC = 0x53504543; // "SPEC"
-    private static final int STATE_VERSION = 1;
+    private static final int STATE_VERSION = 2;
 
     public byte[] saveState() {
         try {
@@ -475,6 +528,14 @@ public final class Specialist implements Bus {
             out.writeBoolean(bIn);
             out.writeBoolean(cLoIn);
             out.writeBoolean(cHiIn);
+            out.writeInt(cpu.pendingEi());
+            out.writeLong(cycleCount);
+            out.writeLong(instructions);
+            out.writeLong(sampleAcc);
+            out.writeInt(winCyc); out.writeInt(winHi);
+            out.writeInt(winTapeOut); out.writeInt(winTapeIn);
+            out.writeFloat(hpPrevIn); out.writeFloat(hpPrevOut);
+            out.writeInt(progStart); out.writeInt(progEnd);
             out.flush();
             return bos.toByteArray();
         } catch (IOException e) {
@@ -483,9 +544,20 @@ public final class Specialist implements Bus {
     }
 
     public void loadState(byte[] state) throws IOException {
+        restoreState(state);
+        clearHistory();
+        releaseAllKeys();
+    }
+
+    // History restore deliberately keeps the live keyboard and never emits tape output edges.
+    void restoreState(byte[] state) throws IOException {
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(state));
-        if (in.readInt() != STATE_MAGIC || in.readInt() != STATE_VERSION)
-            throw new IOException("Неверный файл состояния");
+        if (in.readInt() != STATE_MAGIC) throw new IOException("Неверный файл состояния");
+        int version = in.readInt();
+        if (version < 1 || version > STATE_VERSION) throw new IOException("Неверный файл состояния");
+        // Reject truncated imports before touching the running machine.
+        int minimumSize = 8 + 14 + ram.length + colorRam.length + 7 + (version == 2 ? 60 : 0);
+        if (state.length < minimumSize) throw new IOException("Неполный файл состояния");
         cpu.load(in);
         in.readFully(ram);
         in.readFully(colorRam);
@@ -496,7 +568,24 @@ public final class Specialist implements Bus {
         bIn = in.readBoolean();
         cLoIn = in.readBoolean();
         cHiIn = in.readBoolean();
-        applyPortC();
-        releaseAllKeys();
+        if (version >= 2) {
+            cpu.restorePendingEi(in.readInt());
+            cycleCount = in.readLong();
+            instructions = in.readLong();
+            sampleAcc = in.readLong();
+            winCyc = in.readInt(); winHi = in.readInt();
+            winTapeOut = in.readInt(); winTapeIn = in.readInt();
+            hpPrevIn = in.readFloat(); hpPrevOut = in.readFloat();
+            progStart = in.readInt(); progEnd = in.readInt();
+        } else {
+            cycleCount = instructions = sampleAcc = 0;
+            winCyc = winHi = winTapeOut = winTapeIn = 0;
+            hpPrevIn = hpPrevOut = 0;
+            progStart = progEnd = -1;
+        }
+        int eff = cHiIn ? (portC | 0xF0) : portC;
+        beeper = (eff & 0x20) != 0;
+        tapeOut = (eff & 0x80) != 0;
+        curColor = eff & 0xD0;
     }
 }

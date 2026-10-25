@@ -153,6 +153,23 @@
 - SPEC-D08 плавная подстройка декодера ленты (ADR-009), build-17
 - SPEC-D09 обрезанный текст экскурсии исправлен, build-18
 
+### SPEC-019 — Управление временем как в ZX Spectrum
+- Status: In progress
+- Priority: P1 (proposed)
+- Origin: user message, 2026-10-25
+- Original user wording: «перенести функции управления временем из Android-эмулятора ZX Spectrum в Android-эмулятор „Специалиста“».
+- Why / user problem: изучать исполнение 8080 и возвращаться к предыдущим состояниям.
+- Desired outcome: ±1 инструкция, ±1 секунда, около 10 с истории; скорость ×4…1 такт/с,
+  логарифмический ползунок и кнопки в паузе, как в ZX.
+- Acceptance criteria: детерминированный откат CPU/RAM/ВВ55/цвета/времени; тесты отката и
+  восстановления; сборки SPEC и неизменённого ZX; PR владельцу, без merge.
+- Constraints and preferences: не менять shell/ и ZX; внешняя лента не должна нарушать
+  детерминизм; перемотка вне UI-потока; сохранить существующие функции.
+- Implementation: branch `codex/spec-019-time-controls`.
+- Validation: not yet tested.
+- Open questions: нет.
+- Last updated: 2026-10-25, ChatGPT-Codex
+
 ### SPEC-IDEA-001 — Вспышки карты памяти во времени эмулятора, как в ZX
 - Status: Inbox (предложение агента, владелец не просил)
 

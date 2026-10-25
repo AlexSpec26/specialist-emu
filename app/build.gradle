@@ -2,6 +2,10 @@ plugins {
     id 'com.android.application'
 }
 
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}
+
 def runNumber = Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER") ?: "1")
 
 android {

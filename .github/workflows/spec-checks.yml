@@ -1,0 +1,41 @@
+name: SPEC pull request checks
+
+on:
+  pull_request:
+    paths: [ 'app/**', '.github/workflows/spec-checks.yml' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Time controls tests and SPEC APK
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      # SPEC-019 explicitly requires verification that the untouched ZX still builds.
+      - name: ZX compilation regression check (no release)
+        run: gradle --no-daemon :zx:assembleDebug
+      - name: 8080 diagnostics
+        run: |
+          mkdir -p /tmp/core
+          javac -d /tmp/core app/src/main/java/com/alexspec/specialist/core/*.java tools/CpuTest.java
+          git clone --depth 1 https://github.com/superzazu/8080 /tmp/t8080
+          java -cp /tmp/core CpuTest /tmp/t8080/cpu_tests/TST8080.COM /tmp/t8080/cpu_tests/8080PRE.COM /tmp/t8080/cpu_tests/CPUTEST.COM | tee /tmp/cpu.log
+          grep -q 'CPU IS OPERATIONAL' /tmp/cpu.log
+          grep -q 'CPU TESTS OK' /tmp/cpu.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spec-test-results
+          path: app/build/reports/tests/

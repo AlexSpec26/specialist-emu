@@ -36,8 +36,11 @@ final class EmuThread extends Thread {
     private volatile boolean running = true;
     private volatile boolean paused = true;
     private volatile boolean userPaused;
-    /** Emulation speed relative to the real machine, 0.01 (1/100) .. 1. */
-    volatile float speed = 1f;
+    /** Relative speed: x4 through real speed down to one CPU clock per second. */
+    volatile double speed = 1;
+    private double owed;
+    private double previousSpeed = 1;
+    volatile float historySeconds;
     volatile boolean sound = true;
     volatile int colorMode = Specialist.COLOR_WHITE;
 
@@ -146,6 +149,8 @@ final class EmuThread extends Thread {
             drainQueue();
             if (!running) break;
             if (isPaused()) {
+                owed = 0;
+                nextFrame = System.nanoTime();
                 // a queued task (e.g. state load) may have changed the screen
                 if (machine.isRomLoaded()) {
                     machine.render(back, colorMode);
@@ -163,9 +168,16 @@ final class EmuThread extends Thread {
                 continue;
             }
 
-            float sp = Math.max(0.01f, Math.min(1f, speed));
-            int cycles = Math.round(Specialist.CYCLES_PER_FRAME * sp);
-            int samples = machine.run(audioBuf, cycles);
+            double sp = Math.max(1.0 / Specialist.CPU_HZ, Math.min(4, speed));
+            if (sp != previousSpeed) {
+                owed = 0;
+                previousSpeed = sp;
+            }
+            owed += Specialist.CYCLES_PER_FRAME * sp;
+            long before = machine.getCycleCount();
+            int samples = owed >= 1 ? machine.run(audioBuf, (int) owed) : 0;
+            owed -= machine.getCycleCount() - before;
+            if (sp < 1.0 / 64) samples = 0;
             machine.render(back, colorMode);
             // the trace clock follows real time, so flashes last the same at any emulation speed
             if (machine.trace.enabled) {
@@ -232,6 +244,7 @@ final class EmuThread extends Thread {
     }
 
     private void publish() {
+        historySeconds = machine.historySeconds();
         synchronized (frame) {
             System.arraycopy(back, 0, frame, 0, back.length);
         }

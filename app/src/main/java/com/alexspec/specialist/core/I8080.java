@@ -395,6 +395,10 @@ public final class I8080 {
     }
 
     // ---- state ----
+    // Kept separately so version-1 machine saves retain their original CPU layout.
+    int pendingEi() { return pendingEi; }
+    void restorePendingEi(int delay) { pendingEi = delay; }
+
     public void save(java.io.DataOutputStream out) throws java.io.IOException {
         out.writeShort(pc); out.writeShort(sp);
         out.writeByte(a); out.writeByte(getF());

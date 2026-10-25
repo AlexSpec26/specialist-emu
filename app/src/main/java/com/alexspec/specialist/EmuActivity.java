@@ -55,6 +55,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
     private final MicTape mic = new MicTape();
     private boolean resumed;
     private boolean tapPaused;
+    private boolean timeBusy;
 
     // ------------------------------------------------------------------ lifecycle
 
@@ -308,11 +309,16 @@ public final class EmuActivity extends Activity implements MainView.Host {
         view.vibrate = prefs.getBoolean("vibrate", true);
         emu.colorMode = prefs.getInt("color", Specialist.COLOR_WHITE);
         emu.sound = prefs.getBoolean("sound", true);
-        int slow = Math.max(1, Math.min(100, prefs.getInt("slow", 1)));
-        // tape input must run in real time: the microphone does not slow down
-        if (prefs.getBoolean("micOn", false)) slow = 1;
-        emu.speed = 1f / slow;
-        view.speed = 1f / slow;
+        if (!prefs.contains("speedStep")) {
+            int slow = Math.max(1, Math.min(100, prefs.getInt("slow", 1)));
+            int migrated = Speed.REAL + (int) Math.round(Math.log(slow) / Math.log(2));
+            prefs.edit().putInt("speedStep", migrated).apply();
+        }
+        int step = Math.max(0, Math.min(Speed.STEPS - 1, prefs.getInt("speedStep", Speed.REAL)));
+        // Live tape input is tied to wall-clock time.
+        if (prefs.getBoolean("micOn", false)) step = Speed.REAL;
+        emu.speed = Speed.factor(step);
+        view.speedBadge = step == Speed.REAL ? "×1" : Speed.badge(step);
         // tape (магнитофон)
         machine.tapeOutVolume = prefs.getBoolean("tapeOutSnd", true) ? 0.5f : 0f;
         machine.tapeInVolume = prefs.getBoolean("tapeHear", false) ? 0.35f : 0f;
@@ -356,7 +362,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
     }
 
     private void updatePause() {
-        boolean p = tapPaused || openDialogs > 0 || view.isPicking();
+        boolean p = timeBusy || tapPaused || openDialogs > 0 || view.isPicking();
         if (p) {
             view.releaseAll();
             machine.releaseAllKeys();
@@ -368,8 +374,42 @@ public final class EmuActivity extends Activity implements MainView.Host {
 
     @Override
     public void onScreenTapped() {
+        if (timeBusy) return;
         tapPaused = !tapPaused;
         updatePause();
+    }
+
+    @Override
+    public void onStep(int kind) {
+        if (!tapPaused || timeBusy || !machine.isRomLoaded() || kind < 0 || kind > 3) return;
+        timeBusy = true;
+        view.timeBusy = true;
+        updatePause();
+        emu.post(() -> {
+            String message = null;
+            try {
+                if (!machine.canRewind()) {
+                    message = "Для шагов отключите вход с микрофона и запись на внешнюю ленту";
+                } else {
+                    boolean ok = true;
+                    switch (kind) {
+                        case 0: ok = machine.backTime(Specialist.CPU_HZ); break;
+                        case 1: ok = machine.backInstructions(1); break;
+                        case 2: machine.stepInstruction(); break;
+                        case 3: machine.forward(Specialist.CPU_HZ); break;
+                    }
+                    if (!ok) message = "Достигнуто начало истории (до 10 секунд; после загрузки — с её момента)";
+                }
+            } finally {
+                final String result = message;
+                ui.post(() -> {
+                    timeBusy = false;
+                    view.timeBusy = false;
+                    if (result != null) toast(result);
+                    updatePause();
+                });
+            }
+        });
     }
 
     // ------------------------------------------------------------------ menu
@@ -394,8 +434,8 @@ public final class EmuActivity extends Activity implements MainView.Host {
         actions.add(this::exportState);
         items.add("📦  Импорт сохранения…");
         actions.add(this::importState);
-        int slowNow = Math.round(1f / emu.speed);
-        items.add(slowNow <= 1 ? "⏱  Замедление: нет (реальная скорость)…" : "⏱  Замедление: в " + slowNow + " раз…");
+        items.add("⏱  Скорость: " + Speed.describe(prefs.getBoolean("micOn", false)
+                ? Speed.REAL : prefs.getInt("speedStep", Speed.REAL)) + "…");
         actions.add(this::showSpeed);
         items.add(prefs.getBoolean("micOn", false) ? "📼  Магнитофон (вход с микрофона ВКЛ)…" : "📼  Магнитофон…");
         actions.add(this::showTape);
@@ -432,40 +472,49 @@ public final class EmuActivity extends Activity implements MainView.Host {
         box.setOrientation(android.widget.LinearLayout.VERTICAL);
         int pad = (int) (20 * getResources().getDisplayMetrics().density);
         box.setPadding(pad, pad / 2, pad, 0);
+        android.widget.TextView label = new android.widget.TextView(this);
+        label.setTextSize(18);
+        label.setGravity(android.view.Gravity.CENTER);
         android.widget.TextView hint = new android.widget.TextView(this);
-        hint.setText("Во сколько раз медленнее настоящего «Специалиста»: 1 — реальная скорость, "
-                + "100 — в сто раз медленнее (удобно рассматривать карту памяти).");
-        android.widget.EditText input = new android.widget.EditText(this);
-        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        input.setText(String.valueOf(Math.max(1, Math.round(1f / emu.speed))));
-        input.setSelectAllOnFocus(true);
-        input.setTextSize(28);
-        input.setGravity(android.view.Gravity.CENTER);
+        hint.setText("Каждый шаг — вдвое. Вправо — медленнее, до 1 такта в секунду: можно рассмотреть "
+                + "работу каждой команды 8080. В паузе — шаги по одной команде и по секунде.");
+        android.widget.SeekBar bar = new android.widget.SeekBar(this);
+        bar.setMax(Speed.STEPS - 1);
+        int cur = prefs.getInt("speedStep", Speed.REAL);
+        bar.setProgress(cur);
+        Runnable upd = () -> label.setText(Speed.describe(bar.getProgress()));
+        upd.run();
+        bar.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(android.widget.SeekBar sb, int p, boolean fromUser) {
+                upd.run();
+            }
+
+            @Override
+            public void onStartTrackingTouch(android.widget.SeekBar sb) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(android.widget.SeekBar sb) {
+            }
+        });
+        box.addView(label);
+        box.addView(bar);
         box.addView(hint);
-        box.addView(input);
-        AlertDialog d = show(new AlertDialog.Builder(this)
-                .setTitle("Замедление")
+        show(new AlertDialog.Builder(this)
+                .setTitle("Скорость")
                 .setView(box)
                 .setPositiveButton("OK", (dlg, w) -> {
-                    int v;
-                    try {
-                        v = Integer.parseInt(input.getText().toString().trim());
-                    } catch (NumberFormatException e) {
-                        v = 1;
-                    }
-                    v = Math.max(1, Math.min(100, v));
-                    prefs.edit().putInt("slow", v).apply();
+                    prefs.edit().putInt("speedStep", bar.getProgress()).apply();
                     applySettings();
-                    toast(v == 1 ? "Реальная скорость" : "Замедление в " + v + " раз");
+                    if (prefs.getBoolean("micOn", false) && bar.getProgress() != Speed.REAL)
+                        toast("Пока включён вход с микрофона, скорость реальная");
                 })
-                .setNeutralButton("1 — реальная", (dlg, w) -> {
-                    prefs.edit().putInt("slow", 1).apply();
+                .setNeutralButton("Реальная", (dlg, w) -> {
+                    prefs.edit().putInt("speedStep", Speed.REAL).apply();
                     applySettings();
                 })
                 .setNegativeButton("Отмена", null));
-        input.requestFocus();
-        if (d.getWindow() != null)
-            d.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
     }
 
     private static final String[] COLOR_NAMES = {"зелёный", "красный", "малиновый", "жёлтый", "голубой", "синий",
