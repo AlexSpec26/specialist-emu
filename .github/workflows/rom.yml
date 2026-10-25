@@ -40,6 +40,11 @@ jobs:
           javac -d /tmp/core -cp /tmp/core tools/ShellTiming.java
           java -Djava.awt.headless=true -Dstdout.encoding=UTF-8 -cp /tmp/core ShellTiming shell/build/shell.rom shell/build/shell.sym /tmp/timing 650
 
+      - name: Program "Память" driven by keys (ROM-002)
+        run: |
+          javac -d /tmp/core -cp /tmp/core tools/ShellMemTest.java
+          java -Djava.awt.headless=true -Dstdout.encoding=UTF-8 -cp /tmp/core ShellMemTest shell/build/shell.rom shell/build/shell.sym /tmp/memtest
+
       - name: Rename
         run: cp shell/build/shell.rom shell-${{ github.run_number }}.rom
 

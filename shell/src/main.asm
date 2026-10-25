@@ -50,7 +50,19 @@ GP3             EQU VARS+24h
 SPTR            EQU VARS+26h        ; 2 bytes: string pointer after GRP4
 CH4             EQU VARS+28h        ; 4 bytes: repeated character for REPCH
 SSAVE           EQU VARS+2Ch        ; 2 bytes: SP saved while scrolling
-APPVARS         EQU VARS+30h        ; 50h bytes for the programs
+SCREND          EQU VARS+2Eh        ; scrolling stops at this screen page
+APPVARS         EQU VARS+30h        ; 50h bytes: state of the programs (kept while switching)
+LBUF            EQU 8E00h           ; 64 bytes: line being built (page-aligned: L = length)
+INBUF           EQU 8E40h           ; 16 bytes: digits typed by HEXIN
+; shell stack: 8F00 down to about 8E50
+
+; characters of the shell set
+C_HL            EQU 0E0h            ; ─
+C_VL2           EQU 0ECh            ; ║
+C_TL            EQU 0F1h            ; ╟
+C_TR            EQU 0F2h            ; ╢
+C_FULL          EQU 0F3h            ; █
+C_DOT           EQU 0FAh            ; ·
 
 ; ---------------------------------------------------------------- base ROM
         ORG 0C000h

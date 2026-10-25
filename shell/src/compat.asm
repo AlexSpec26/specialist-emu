@@ -35,9 +35,11 @@ M_GETTOP:
 
 
 
-        ASSERT $ <= 0CE1Dh, "compat helpers run into CE1D"
-        ; free space up to CE1D keeps Monitor-2's own bytes: some games read ROM bytes as data
-        ; (Piton 3 reads CD21-CD28)
+        ; a program fits here; Monitor-2's own bytes must stay from CD21 on, because some games
+        ; read ROM bytes as data (Piton 3 reads CD21-CD28)
+        INCLUDE "overview.asm"
+        ASSERT $ <= 0CD21h, "code runs into CD21 (Monitor-2 bytes read by games)"
+        ; the rest up to CE1D: Monitor-2's bytes
         INCBIN "../base/spec_m2.rom", $-0C000h, 0CE1Dh-$
         ASSERT $ == 0CE1Dh
 ; C818: print string (HL) up to 00

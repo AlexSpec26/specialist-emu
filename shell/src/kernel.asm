@@ -847,6 +847,9 @@ SCROLLUP:
         LXI H,0
         DAD SP
         SHLD SSAVE
+        MOV A,E
+        ADI 90h
+        STA SCREND
         MOV A,C
         SUB B
         MOV C,A                 ; text rows to move
@@ -902,8 +905,8 @@ SCROLLUP:
         MOV M,A
         INR L
         INR H
-        MOV A,H
-        CPI 0C0h
+        LDA SCREND
+        CMP H
         JNZ .col
         LHLD SSAVE
         SPHL
@@ -914,6 +917,9 @@ SCROLLDN:
         LXI H,0
         DAD SP
         SHLD SSAVE
+        MOV A,E
+        ADI 90h
+        STA SCREND
         MOV A,C
         SUB B
         MOV E,A
@@ -961,12 +967,217 @@ SCROLLDN:
         PUSH D
         PUSH D
         INR H
-        MOV A,H
-        CPI 0C0h
+        LDA SCREND
+        CMP H
         JNZ .col
         LHLD SSAVE
         SPHL
         RET
+
+; ---------------------------------------------------------------- building lines (LBUF)
+; Programs build a line in LBUF and print it with PUTS in one go from a column divisible
+; by 4: that takes the fast path (GRP4). HL = position in the buffer.
+
+; A as two hex digits
+BHEX8:  PUSH PSW
+        RRC
+        RRC
+        RRC
+        RRC
+        CALL HEXDIG
+        MOV M,A
+        INX H
+        POP PSW
+        CALL HEXDIG
+        MOV M,A
+        INX H
+        RET
+
+; DE as four hex digits
+BHEX16: MOV A,D
+        CALL BHEX8
+        MOV A,E
+        JMP BHEX8
+
+; A as eight binary digits; changes B, C
+BBIN8:  MVI C,8
+        MOV B,A
+.l:     MOV A,B
+        RLC
+        MOV B,A
+        MVI A,'0'
+        ACI 0
+        MOV M,A
+        INX H
+        DCR C
+        JNZ .l
+        RET
+
+; A in decimal without leading zeros; changes B, C
+BDEC:   PUSH D
+        MVI C,0
+        MVI B,100
+        CALL .d
+        MVI B,10
+        CALL .d
+        ADI '0'
+        MOV M,A
+        INX H
+        POP D
+        RET
+.d:     MVI D,'0'
+.s:     CMP B
+        JC .e
+        SUB B
+        INR D
+        JMP .s
+.e:     MOV E,A
+        MOV A,D
+        CPI '0'
+        JNZ .w
+        MOV A,C
+        ORA A
+        JZ .k
+.w:     MOV M,D
+        INX H
+        MVI C,1
+.k:     MOV A,E
+        RET
+
+; copy the 00-terminated string (DE) without the 00; DE ends after it
+BSTR:   LDAX D
+        INX D
+        ORA A
+        RZ
+        MOV M,A
+        INX H
+        JMP BSTR
+
+; spaces up to C characters in LBUF
+BPADTO: MOV A,L
+        CMP C
+        RNC
+        MVI M,' '
+        INX H
+        JMP BPADTO
+
+; finish the line at HL and print LBUF at column B, row C
+BPRINT: MVI M,0
+        CALL GOTOXY
+        LXI H,LBUF
+        JMP PUTS
+
+; ---------------------------------------------------------------- hex input
+; A = key code -> A = 0..15, carry clear; carry set if not a hex digit. Letters A-F in both
+; layouts and cases (Latin a-f, A-F; Russian а б ц д е ф on the same keys). Keeps BC, DE, HL.
+HEXVAL: CPI '0'
+        JC .no
+        CPI '9'+1
+        JNC .let
+        SUI '0'
+        RET
+.let:   PUSH B
+        MOV B,A
+        ANI 0Fh
+        JZ .nob
+        CPI 7
+        JNC .nob
+        MOV C,A
+        MOV A,B
+        ANI 0F0h
+        CPI 40h
+        JZ .ok
+        CPI 60h
+        JZ .ok
+        CPI 80h
+        JZ .ok
+        CPI 0A0h
+        JZ .ok
+.nob:   POP B
+.no:    STC
+        RET
+.ok:    MOV A,C
+        ADI 9
+        POP B
+        ORA A
+        RET
+
+; Read up to B hex digits at the text cursor into INBUF (values 0..15). ВК ends (carry clear),
+; АР2 cancels (carry set); ← deletes. C = number of digits. Changes A, C, D.
+HEXIN:  MVI C,0
+.k:     MVI A,'_'
+        CALL PUTCH
+        LDA CURX
+        DCR A
+        STA CURX
+        CALL GETKEY
+        CPI 1Bh
+        JZ .esc
+        CPI 0Dh
+        JZ .ok
+        CPI 08h
+        JZ .bs
+        CALL HEXVAL
+        JC .k
+        MOV D,A
+        MOV A,C
+        CMP B
+        JNC .k
+        PUSH H
+        ADI LOW(INBUF)
+        MOV L,A
+        MVI H,HIGH(INBUF)
+        MOV M,D
+        POP H
+        INR C
+        MOV A,D
+        CALL HEXDIG
+        CALL PUTCH
+        JMP .k
+.bs:    MOV A,C
+        ORA A
+        JZ .k
+        DCR C
+        MVI A,' '
+        CALL PUTCH
+        LDA CURX
+        SUI 2
+        STA CURX
+        JMP .k
+.ok:    MVI A,' '
+        CALL PUTCH
+        ORA A
+        RET
+.esc:   MVI A,' '
+        CALL PUTCH
+        STC
+        RET
+
+; HL = HL - DE, carry if it went below zero
+SUB16:  MOV A,L
+        SUB E
+        MOV L,A
+        MOV A,H
+        SBB D
+        MOV H,A
+        RET
+
+; HL = the last (up to 4) digits of INBUF; C = digit count. Changes A, C, DE.
+DIG2HL: LXI H,0
+        LXI D,INBUF
+.l:     MOV A,C
+        ORA A
+        RZ
+        DAD H
+        DAD H
+        DAD H
+        DAD H
+        LDAX D
+        ORA L
+        MOV L,A
+        INX D
+        DCR C
+        JMP .l
 
 ; ---------------------------------------------------------------- keyboard
 ; Scan the 12 x 6 matrix. Returns A = column*6 + row of the first pressed key, FF if none.

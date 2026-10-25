@@ -59,10 +59,21 @@ public class ShellTiming {
         long ov = call("REDRAW");
         report("REDRAW Обзор", ov);
         save(out, "overview");
-        m.write(sym.get("CURAPP"), 1);
+        m.write(sym.get("CURAPP"), 2);
         long st = call("REDRAW");
         report("REDRAW заглушка", st);
         save(out, "stub");
+        if (sym.containsKey("MEM_DRAW")) {
+            m.write(sym.get("CURAPP"), 1);
+            report("REDRAW Память", call("REDRAW"));
+            save(out, "memory");
+            m.write(sym.get("TMP"), 0x18);                      // →: cursor only
+            report("Память: → (курсор)", call("MEM_KEY"));
+            m.write(sym.get("TMP"), 0x1A);                      // ↓: new line in the picture
+            report("Память: ↓", call("MEM_KEY"));
+            for (int i = 0; i < 14; i++) call("MEM_KEY");
+            report("Память: ↓ с прокруткой", call("MEM_KEY"));
+        }
         m.write(sym.get("CURAPP"), 0);
         // one full text row: 64 characters, normal and inverted
         long row = callRow(false);
@@ -72,21 +83,21 @@ public class ShellTiming {
         // scrolling rows 1..30 up and down; the result is checked against plain array moves
         call("REDRAW");
         int[] before = screen();
-        m.cpu.b = 1; m.cpu.c = 30;
+        m.cpu.b = 1; m.cpu.c = 30; m.cpu.e = 48;
         long up = callRegs("SCROLLUP");
         report("прокрутка вверх, строки 1–30", up);
         check("SCROLLUP", before, screen(), 1, 30, true);
         before = screen();
-        m.cpu.b = 1; m.cpu.c = 30;
+        m.cpu.b = 1; m.cpu.c = 30; m.cpu.e = 48;
         long dn = callRegs("SCROLLDN");
         report("прокрутка вниз, строки 1–30", dn);
         check("SCROLLDN", before, screen(), 1, 30, false);
         before = screen();
-        m.cpu.b = 0; m.cpu.c = 31;
+        m.cpu.b = 0; m.cpu.c = 31; m.cpu.e = 48;
         callRegs("SCROLLDN");
         check("SCROLLDN 0–31", before, screen(), 0, 31, false);
         before = screen();
-        m.cpu.b = 0; m.cpu.c = 31;
+        m.cpu.b = 0; m.cpu.c = 31; m.cpu.e = 48;
         callRegs("SCROLLUP");
         check("SCROLLUP 0–31", before, screen(), 0, 31, true);
         if (System.getProperty("profile") != null) {

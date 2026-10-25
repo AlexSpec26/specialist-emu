@@ -13,12 +13,13 @@ zx/         ZX: Android-приложение ZX Spectrum 48K (com.alexspec.zx)
   assets/   48k.rom, games/*.tap|tzx + LICENSE.txt
 shell/      ROM: оболочка в ПЗУ «Специалиста»
   src/      main.asm (раскладка ПЗУ), compat.asm (Монитор-2), kernel.asm (текст, клавиатура),
-            shell.asm (строки, переключение), apps.asm (программы), *.inc (генерируемые)
+            shell.asm (строки, переключение), apps.asm (программы), overview.asm, *.inc (генерируемые)
   base/     spec_m2.rom — источник базовых 2 КБ (C000–C7FF)
   tools/    asm80.py (ассемблер 8080), dis80.py, mkfont.py, mkkeys.py, lower.py (строчные)
   build/    shell.rom (собирается)
 flipper/    FLIP (заморожен): spec_core.c, specialist_app.c, assets
-tools/      настольные тесты (Java): CpuTest, MachineTest, ShellCompat, ShellSmoke, ShellTiming (SPEC/ROM);
+tools/      настольные тесты (Java): CpuTest, MachineTest, ShellCompat, ShellSmoke, ShellTiming,
+            ShellMemTest (SPEC/ROM);
             Z80FuseTest, ZexTest, ZxShot (ZX); flipper_core_test.c (FLIP)
 .github/workflows/  build.yml (SPEC), zx.yml (ZX), rom.yml (ROM), flipper.yml (FLIP, вручную)
 ```
@@ -43,9 +44,10 @@ tools/      настольные тесты (Java): CpuTest, MachineTest, ShellC
   повторяются 512 раз).
 - Клавиатура: матрица 12×6, код = столбец·6 + строка; столбцы — порт A и младшая тетрада C,
   строки — порт B биты 2–7, НР — B бит 1, лента — B бит 0.
-- Оболочка: переменные 8F00–8F7F, стек под 8F00.
-- Раскладка ПЗУ оболочки: C800–C835 точки входа; таблицы; совместимые подпрограммы (CDxx, байты
-  Монитора-2 в свободном месте до CE1D, затем CE1D–CF3A фиксированно); ядро, оболочка, программы
+- Оболочка: переменные 8F00–8F7F (с 8F30 — состояние программ), LBUF 8E00 (строка), INBUF 8E40
+  (ввод), стек от 8F00 вниз.
+- Раскладка ПЗУ оболочки: C800–C835 точки входа; таблицы; совместимые подпрограммы (затем «Обзор»
+  до CD20; CD21–CE1C байты Монитора-2 — их читают игры; CE1D–CF3A фиксированно); ядро, оболочка, программы
   до EBFF; EC00–EFFF доп. символы 80–FF (выровнены по странице — так быстрее адрес глифа).
 - Вывод текста: GRP4 — 4 символа с колонки ×4 в 3 байта целиком; PUTCH — один символ (чтение-
   изменение-запись). Программам: строку в буфер, затем PUTS. Замер: `ShellTiming` (см. Команды).
