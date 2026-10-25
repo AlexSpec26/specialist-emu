@@ -112,5 +112,12 @@ ROM_END:
         ASSERT ROM_END <= 0EC00h, "ROM overflow: code runs into the glyphs at EC00"
         ORG 0EC00h
 GLYPHS:
-        INCLUDE "glyphs.inc"
+        INCLUDE "glyphs.inc"            ; 80-BC
+        ; codes BD-DF have no glyph: 280 bytes of code live there (GADR still finds 80-BC
+        ; and E0-FF at code*8)
+        ASSERT $ == 0EDE8h
+        INCLUDE "hexin.asm"
+        ASSERT $ <= 0EF00h, "code runs into the pseudographics glyphs at EF00"
+        ORG 0EF00h
+        INCLUDE "glyphs_hi.inc"         ; E0-FF
         ASSERT $ == 0F000h

@@ -208,6 +208,21 @@ PRINTAT:
         CALL GOTOXY
         JMP PRINT
 
+; strings at positions, after the CALL: DB column,row / TEXT "...",0 / ... / DB 0FFh
+PRINTL: XTHL
+.l:     MOV A,M
+        INX H
+        CPI 0FFh
+        JZ .x
+        MOV B,A
+        MOV C,M
+        INX H
+        CALL GOTOXY
+        CALL PUTS
+        JMP .l
+.x:     XTHL
+        RET
+
 ; A = character, B = count (A kept, B = 0 at the end)
 REPCH:  STA CH4
         STA CH4+1
@@ -839,141 +854,6 @@ PAGETAB: DB HIGH(FONT), HIGH(FONT)+1, HIGH(FONT)+2, HIGH(FONT)+3
         DB HIGH(GLYPHS), HIGH(GLYPHS)+1, HIGH(GLYPHS)+2, HIGH(GLYPHS)+3
         ASSERT LOW(PAGETAB) <= 0F8h, "PAGETAB crosses a page"
 
-; ---------------------------------------------------------------- scrolling (ROM-001)
-; Text rows move by copying screen memory; the stack serves as a fast second pointer (the
-; Specialist has no interrupts). B = top row, C = bottom row, B < C. Changes A, BC, DE, HL.
-; SCROLLUP: rows B+1..C move up one row, row C is cleared.
-SCROLLUP:
-        LXI H,0
-        DAD SP
-        SHLD SSAVE
-        MOV A,E
-        ADI 90h
-        STA SCREND
-        MOV A,C
-        SUB B
-        MOV C,A                 ; text rows to move
-        MOV A,B
-        ADD A
-        ADD A
-        ADD A
-        MOV B,A                 ; first destination byte in a column
-        MVI H,90h
-.col:   MOV A,B
-        ADI 8
-        MOV L,A
-        SPHL                    ; SP = source
-        MOV L,B                 ; HL = destination
-        MOV A,C
-.row:
-        POP D
-        MOV M,E
-        INR L
-        MOV M,D
-        INR L
-        POP D
-        MOV M,E
-        INR L
-        MOV M,D
-        INR L
-        POP D
-        MOV M,E
-        INR L
-        MOV M,D
-        INR L
-        POP D
-        MOV M,E
-        INR L
-        MOV M,D
-        INR L
-        DCR A
-        JNZ .row
-        MOV M,A
-        INR L
-        MOV M,A
-        INR L
-        MOV M,A
-        INR L
-        MOV M,A
-        INR L
-        MOV M,A
-        INR L
-        MOV M,A
-        INR L
-        MOV M,A
-        INR L
-        MOV M,A
-        INR L
-        INR H
-        LDA SCREND
-        CMP H
-        JNZ .col
-        LHLD SSAVE
-        SPHL
-        RET
-
-; SCROLLDN: rows B..C-1 move down one row, row B is cleared.
-SCROLLDN:
-        LXI H,0
-        DAD SP
-        SHLD SSAVE
-        MOV A,E
-        ADI 90h
-        STA SCREND
-        MOV A,C
-        SUB B
-        MOV E,A
-        MOV A,C
-        ADD A
-        ADD A
-        ADD A
-        DCR A
-        MOV B,A                 ; last source byte in a column
-        MOV C,E                 ; text rows to move
-        MVI H,90h
-.col:   MOV L,B
-        LXI D,9
-        DAD D
-        SPHL                    ; SP = one past the last destination byte
-        LXI D,-9
-        DAD D                   ; HL = last source byte
-        MOV A,C
-.row:
-        MOV D,M
-        DCR L
-        MOV E,M
-        DCR L
-        PUSH D
-        MOV D,M
-        DCR L
-        MOV E,M
-        DCR L
-        PUSH D
-        MOV D,M
-        DCR L
-        MOV E,M
-        DCR L
-        PUSH D
-        MOV D,M
-        DCR L
-        MOV E,M
-        DCR L
-        PUSH D
-        DCR A
-        JNZ .row
-        LXI D,0
-        PUSH D
-        PUSH D
-        PUSH D
-        PUSH D
-        INR H
-        LDA SCREND
-        CMP H
-        JNZ .col
-        LHLD SSAVE
-        SPHL
-        RET
-
 ; ---------------------------------------------------------------- building lines (LBUF)
 ; Programs build a line in LBUF and print it with PUTS in one go from a column divisible
 ; by 4: that takes the fast path (GRP4). HL = position in the buffer.
@@ -1077,118 +957,6 @@ BPRINT: MVI M,0
         CALL GOTOXY
         LXI H,LBUF
         JMP PUTS
-
-; ---------------------------------------------------------------- hex input
-; A = key code -> A = 0..15, carry clear; carry set if not a hex digit. Letters A-F in both
-; layouts and cases (Latin a-f, A-F; Russian а б ц д е ф on the same keys). Keeps BC, DE, HL.
-HEXVAL: CPI '0'
-        JC .no
-        CPI '9'+1
-        JNC .let
-        SUI '0'
-        RET
-.let:   PUSH B
-        MOV B,A
-        ANI 0Fh
-        JZ .nob
-        CPI 7
-        JNC .nob
-        MOV C,A
-        MOV A,B
-        ANI 0F0h
-        CPI 40h
-        JZ .ok
-        CPI 60h
-        JZ .ok
-        CPI 80h
-        JZ .ok
-        CPI 0A0h
-        JZ .ok
-.nob:   POP B
-.no:    STC
-        RET
-.ok:    MOV A,C
-        ADI 9
-        POP B
-        ORA A
-        RET
-
-; Read up to B hex digits at the text cursor into INBUF (values 0..15). ВК ends (carry clear),
-; АР2 cancels (carry set); ← deletes. C = number of digits. Changes A, C, D.
-HEXIN:  MVI C,0
-.k:     MVI A,'_'
-        CALL PUTCH
-        LDA CURX
-        DCR A
-        STA CURX
-        CALL GETKEY
-        CPI 1Bh
-        JZ .esc
-        CPI 0Dh
-        JZ .ok
-        CPI 08h
-        JZ .bs
-        CALL HEXVAL
-        JC .k
-        MOV D,A
-        MOV A,C
-        CMP B
-        JNC .k
-        PUSH H
-        ADI LOW(INBUF)
-        MOV L,A
-        MVI H,HIGH(INBUF)
-        MOV M,D
-        POP H
-        INR C
-        MOV A,D
-        CALL HEXDIG
-        CALL PUTCH
-        JMP .k
-.bs:    MOV A,C
-        ORA A
-        JZ .k
-        DCR C
-        MVI A,' '
-        CALL PUTCH
-        LDA CURX
-        SUI 2
-        STA CURX
-        JMP .k
-.ok:    MVI A,' '
-        CALL PUTCH
-        ORA A
-        RET
-.esc:   MVI A,' '
-        CALL PUTCH
-        STC
-        RET
-
-; HL = HL - DE, carry if it went below zero
-SUB16:  MOV A,L
-        SUB E
-        MOV L,A
-        MOV A,H
-        SBB D
-        MOV H,A
-        RET
-
-; HL = the last (up to 4) digits of INBUF; C = digit count. Changes A, C, DE.
-DIG2HL: LXI H,0
-        LXI D,INBUF
-.l:     MOV A,C
-        ORA A
-        RZ
-        DAD H
-        DAD H
-        DAD H
-        DAD H
-        LDAX D
-        ORA L
-        MOV L,A
-        INX D
-        DCR C
-        JMP .l
 
 ; ---------------------------------------------------------------- keyboard
 ; Scan the 12 x 6 matrix. Returns A = column*6 + row of the first pressed key, FF if none.

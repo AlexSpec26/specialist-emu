@@ -3,7 +3,7 @@
 ;  handler (A = key).
 ; =====================================================================================
 
-APPTAB: DW N_OVERVIEW, OVERVIEW_DRAW, OVERVIEW_KEY
+APPTAB: DW N_OVERVIEW, OVERVIEW_DRAW, NOKEY
         DW N_MEMORY,   MEM_DRAW,      MEM_KEY
         DW N_TAPE,     TAPE_DRAW,     TAPE_KEY
         DW N_MONITOR,  MON_DRAW,      MON_KEY
@@ -95,20 +95,10 @@ MCOLS   EQU 33                  ; screen bytes to scroll (text columns 0..43)
 MMSG    EQU 27                  ; message row
 
 MEM_DRAW:
-        MVI B,0
-        MVI C,1
-        MVI D,63
-        MVI E,30
-        MVI A,1
-        CALL FRAME
-        MVI B,2
-        MVI C,1
-        CALL PRINTAT
-        TEXT " Память ",0
-        MVI B,2
-        MVI C,2
-        CALL PRINTAT
+        CALL PRINTL
+        DB 2,2
         TEXT "Адрес +0 +1 +2 +3 +4 +5 +6 +7  Текст      Биты",0
+        DB 0FFh
         MVI B,0
         MVI C,20
         CALL GOTOXY
@@ -119,10 +109,10 @@ MEM_DRAW:
         CALL REPCH
         MVI A,C_TR
         CALL PUTCH
-        MVI B,4
-        MVI C,24
-        CALL PRINTAT
+        CALL PRINTL
+        DB 4,24
         TEXT "◄►▲▼ НР+▲▼ курсор  F5 hex/текст  ЗБ удалить  СТР вставить",0
+        DB 0FFh
         CALL MEM_HELP2
         CALL MEM_ROWS
         CALL MEM_NOPIC
@@ -359,146 +349,6 @@ MEM_INFO:
         JMP BPRINT
 S_HEX:  TEXT 01h," ввод: HEX ",02h,0
 S_TXT:  TEXT 01h," ввод: ТЕКСТ ",02h,0
-
-; DE = address -> its description at HL
-MEM_DESC:
-        MOV A,D
-        CPI 8Eh
-        JC .user
-        JZ .buf
-        CPI 8Fh
-        JNZ .hi
-        MOV A,E
-        CPI 80h
-        JC .svar
-        LXI D,S_D_MVAR
-        JMP BSTR
-.user:  LXI D,S_D_USER
-        JMP BSTR
-.buf:   LXI D,S_D_BUF
-        JMP BSTR
-.svar:  LXI D,S_D_SVAR
-        JMP BSTR
-.hi:    CPI 0C0h
-        JC .scr
-        CPI 0C5h
-        JC .base
-        CPI 0C8h
-        JC .font
-        CPI 0ECh
-        JC .rom
-        CPI 0F0h
-        JC .glyph
-        CPI 0F8h
-        JC .none
-        MOV A,E                 ; keyboard ВВ55
-        PUSH PSW
-        LXI D,S_D_PPI
-        CALL BSTR
-        POP PSW
-        ANI 3
-        CPI 3
-        JZ .ctl
-        ADI 'A'
-        MOV M,A
-        INX H
-        RET
-.ctl:   LXI D,S_D_CTL
-        JMP BSTR
-.none:  LXI D,S_D_NONE
-        JMP BSTR
-.base:  LXI D,S_D_BASE
-        JMP BSTR
-.rom:   CPI 0C8h
-        JNZ .shell
-        MOV A,E
-        CPI 36h
-        JNC .shell
-        LXI D,S_D_ENTRY
-        JMP BSTR
-.shell: LXI D,S_D_SHELL
-        JMP BSTR
-.scr:   PUSH D
-        LXI D,S_D_SCR
-        CALL BSTR
-        POP D
-        MOV A,D
-        SUI 90h
-        CALL BDEC
-        PUSH D
-        LXI D,S_D_LINE
-        CALL BSTR
-        POP D
-        MOV A,E
-        JMP BDEC
-.font:  PUSH D
-        LXI D,S_D_FONT
-        CALL BSTR
-        POP D
-        MOV A,D
-        SUI 0C4h                ; font = C400 + code*8, codes 20-7F
-        JMP .chr
-.glyph: PUSH D
-        LXI D,S_D_GLYPH
-        CALL BSTR
-        POP D
-        MOV A,D
-        SUI 0ECh-4              ; codes 80-FF
-.chr:   ; A = page offset (0..7): code = A*32 + E/8
-        RRC
-        RRC
-        RRC
-        ANI 0E0h
-        MOV B,A
-        MOV A,E
-        RRC
-        RRC
-        RRC
-        ANI 1Fh
-        ORA B
-        PUSH PSW
-        CALL BHEX8
-        MVI M,'h'
-        INX H
-        MVI M,' '
-        INX H
-        MVI M,'"'
-        INX H
-        POP PSW
-        CPI 3                   ; 00-02 cannot go into a string
-        JNC .c
-        MVI A,C_DOT
-.c:     MOV M,A
-        INX H
-        MVI M,'"'
-        INX H
-        PUSH D
-        LXI D,S_D_ROW
-        CALL BSTR
-        POP D
-        MOV A,E
-        ANI 7
-        INR A
-        CALL BDEC
-        LXI D,S_D_OF8
-        JMP BSTR
-
-S_D_USER:  TEXT "ОЗУ: программы и данные",0
-S_D_BUF:   TEXT "ОЗУ: буфер строки и стек оболочки (8E00-8EFF)",0
-S_D_SVAR:  TEXT "ОЗУ: переменные оболочки (8F00-8F7F)",0
-S_D_MVAR:  TEXT "ОЗУ: переменные монитора (8F80-8FFF)",0
-S_D_SCR:   TEXT "экран: байт-столбец ",0
-S_D_LINE:  TEXT ", строка точек ",0
-S_D_BASE:  TEXT "ПЗУ: базовые подпрограммы (C000-C4FF)",0
-S_D_FONT:  TEXT "ПЗУ: шрифт, символ ",0
-S_D_GLYPH: TEXT "ПЗУ: доп. символы, символ ",0
-S_D_ROW:   TEXT ", строка ",0
-S_D_OF8:   TEXT " из 8",0
-S_D_ENTRY: TEXT "ПЗУ: точки входа монитора (C800-C835)",0
-S_D_SHELL: TEXT "ПЗУ: оболочка",0
-S_D_NONE:  TEXT "здесь нет памяти (F000-F7FF)",0
-S_D_PPI:   TEXT "клавиатура ВВ55 (F800-FFFF), регистр ",0
-S_D_CTL:   TEXT "управления",0
 
 ; the picture of the cursor's 8-byte line (only when that line changed)
 MEM_BITS:
@@ -1076,28 +926,14 @@ TWE     EQU APPVARS+22h         ; 2: end
 TBAR    EQU 20*8+3              ; progress bar: a line of points in text row 20
 
 TAPE_DRAW:
-        MVI B,0
-        MVI C,1
-        MVI D,63
-        MVI E,30
-        MVI A,1
-        CALL FRAME
-        MVI B,2
-        MVI C,1
-        CALL PRINTAT
-        TEXT " Магнитофон ",0
-        MVI B,4
-        MVI C,3
-        CALL PRINTAT
+        CALL PRINTL
+        DB 4,3
         TEXT "F2 загрузить с ленты   F3 записать на ленту   F5 запустить",0
-        MVI B,4
-        MVI C,5
-        CALL PRINTAT
+        DB 4,5
         TEXT "Остановить чтение: любая клавиша, затем ВК.",0
-        MVI B,4
-        MVI C,6
-        CALL PRINTAT
+        DB 4,6
         TEXT "Загрузка выше 8DFF не пишется: там оболочка.",0
+        DB 0FFh
 ; rows 9-10: the last block read
 TAPE_INFO:
         LXI H,LBUF
@@ -1362,20 +1198,10 @@ MOROWN  EQU 26                  ; one past the last output row
 MPROMPT EQU 28
 
 MON_DRAW:
-        MVI B,0
-        MVI C,1
-        MVI D,63
-        MVI E,30
-        MVI A,1
-        CALL FRAME
-        MVI B,2
-        MVI C,1
-        CALL PRINTAT
-        TEXT " Монитор ",0
-        MVI B,4
-        MVI C,26
-        CALL PRINTAT
+        CALL PRINTL
+        DB 4,26
         TEXT "D адр кон  M адр бб..  F адр кон бб  T адр кон куда  G адр",0
+        DB 0FFh
         MVI A,MOROW0
         STA ORow
 ; the input line: "> command_"

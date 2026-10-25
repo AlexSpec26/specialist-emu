@@ -38,10 +38,14 @@ M_GETTOP:
         ; a program fits here; Monitor-2's own bytes must stay from CD21 on, because some games
         ; read ROM bytes as data (Piton 3 reads CD21-CD28)
         INCLUDE "overview.asm"
+        INCLUDE "memdesc.asm"
         ASSERT $ <= 0CD21h, "code runs into CD21 (Monitor-2 bytes read by games)"
-        ; the rest up to CE1D: Monitor-2's bytes
-        INCBIN "../base/spec_m2.rom", $-0C000h, 0CE1Dh-$
-        ASSERT $ == 0CE1Dh
+        ORG 0CD21h
+        ; Piton 3 reads CD21-CD28 of the ROM as data: Monitor-2's bytes stay there
+        INCBIN "../base/spec_m2.rom", 0D21h, 8
+        INCLUDE "scroll.asm"
+        ASSERT $ <= 0CE1Dh, "code runs into CE1D (fixed Monitor-2 routines)"
+        ORG 0CE1Dh
 ; C818: print string (HL) up to 00
 M_PUTS: MOV A,M
         MOV C,A

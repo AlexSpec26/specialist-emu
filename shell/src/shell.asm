@@ -56,6 +56,22 @@ MAIN:   LXI SP,STACK_TOP
 REDRAW: CALL CLS
         CALL TOPBAR
         CALL STATUSBAR
+        MVI B,0                 ; the program's frame with its name
+        MVI C,1
+        MVI D,63
+        MVI E,30
+        MVI A,1
+        CALL FRAME
+        MVI B,2
+        MVI C,1
+        CALL GOTOXY
+        MVI A,' '
+        CALL PUTCH
+        LDA CURAPP
+        CALL APP_NAME
+        CALL PUTS
+        MVI A,' '
+        CALL PUTCH
         JMP APP_DRAW
 
 TOPBAR: MVI C,0
