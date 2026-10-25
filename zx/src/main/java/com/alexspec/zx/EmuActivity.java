@@ -288,11 +288,11 @@ public final class EmuActivity extends Activity implements MainView.Host {
         view.joy8 = prefs.getBoolean("joy8", true);
         view.vibrate = prefs.getBoolean("vibrate", true);
         emu.sound = prefs.getBoolean("sound", true);
-        int slow = Math.max(1, Math.min(100, prefs.getInt("slow", 1)));
+        int step = Math.max(0, Math.min(Speed.STEPS - 1, prefs.getInt("speedStep", Speed.REAL)));
         // tape input must run in real time: the microphone does not slow down
-        if (prefs.getBoolean("micOn", false)) slow = 1;
-        emu.speed = 1f / slow;
-        view.speed = 1f / slow;
+        if (prefs.getBoolean("micOn", false)) step = Speed.REAL;
+        emu.speed = Speed.factor(step);
+        view.speedBadge = Speed.badge(step);
         // tape
         machine.flashLoad = prefs.getBoolean("flashLoad", true);
         emu.turboLoad = prefs.getBoolean("turboLoad", true);
@@ -307,7 +307,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
                 prefs.getInt("colRW", 0xFFFFE030), prefs.getInt("colX", 0xFF20E8FF));
         machine.trace.setFlashFrames(prefs.getInt("flash", 5));
         view.mapOn = map;
-        machine.trace.layout = prefs.getInt("mapLayout", 0);
+        machine.trace.layout = Math.max(1, Math.min(4, prefs.getInt("mapW", 1)));
         view.ctrlAlpha = prefs.getInt("ctrlAlpha", 100) / 100f;
         view.config = ControlConfig.load(prefs, program);
         view.title = progTitle();
@@ -352,6 +352,26 @@ public final class EmuActivity extends Activity implements MainView.Host {
     public void onScreenTapped() {
         tapPaused = !tapPaused;
         updatePause();
+        if (tapPaused) view.showMachineInfo();
+    }
+
+    @Override
+    public void onStep(int kind) {
+        emu.postKeepScreen(() -> {
+            boolean ok = true;
+            switch (kind) {
+                case 0: ok = machine.backTime(Spectrum48.CPU_HZ); break;
+                case 1: ok = machine.backInstructions(1); break;
+                case 2: machine.stepInstruction(); break;
+                default: machine.forward(Spectrum48.CPU_HZ); break;
+            }
+            if (!ok) {
+                float h = machine.historySeconds();
+                ui.post(() -> toast(String.format(Locale.US,
+                        "Дальше назад нельзя: история хранит %.0f с (после загрузки — с её момента)", Math.max(0, h))));
+            }
+            ui.post(view::showMachineInfo);
+        });
     }
 
     // ------------------------------------------------------------------ menu
@@ -378,8 +398,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
         actions.add(this::exportState);
         items.add("📦  Импорт сохранения…");
         actions.add(this::importState);
-        int slowNow = Math.round(1f / emu.speed);
-        items.add(slowNow <= 1 ? "⏱  Замедление: нет (реальная скорость)…" : "⏱  Замедление: в " + slowNow + " раз…");
+        items.add("⏱  Скорость: " + Speed.describe(prefs.getInt("speedStep", Speed.REAL)) + "…");
         actions.add(this::showSpeed);
         Tape t = machine.tape;
         items.add("📼  Магнитофон" + (t != null ? (t.playing ? " (▶ " + Math.round(t.progress() * 100) + "%)" : " (кассета вставлена)") : "")
@@ -425,40 +444,49 @@ public final class EmuActivity extends Activity implements MainView.Host {
         box.setOrientation(android.widget.LinearLayout.VERTICAL);
         int pad = (int) (20 * getResources().getDisplayMetrics().density);
         box.setPadding(pad, pad / 2, pad, 0);
+        android.widget.TextView label = new android.widget.TextView(this);
+        label.setTextSize(18);
+        label.setGravity(android.view.Gravity.CENTER);
         android.widget.TextView hint = new android.widget.TextView(this);
-        hint.setText("Во сколько раз медленнее настоящего Спектрума: 1 — реальная скорость, "
-                + "100 — в сто раз медленнее (удобно рассматривать карту памяти и то, как луч рисует кадр).");
-        android.widget.EditText input = new android.widget.EditText(this);
-        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        input.setText(String.valueOf(Math.max(1, Math.round(1f / emu.speed))));
-        input.setSelectAllOnFocus(true);
-        input.setTextSize(28);
-        input.setGravity(android.view.Gravity.CENTER);
+        hint.setText("Каждый шаг — вдвое. Вправо — медленнее, до 1 такта в секунду: видно, как луч рисует "
+                + "кадр и как работает каждая команда. В паузе — шаги по одной команде и по секунде.");
+        android.widget.SeekBar bar = new android.widget.SeekBar(this);
+        bar.setMax(Speed.STEPS - 1);
+        int cur = prefs.getInt("speedStep", Speed.REAL);
+        bar.setProgress(cur);
+        Runnable upd = () -> label.setText(Speed.describe(bar.getProgress()));
+        upd.run();
+        bar.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(android.widget.SeekBar sb, int p, boolean fromUser) {
+                upd.run();
+            }
+
+            @Override
+            public void onStartTrackingTouch(android.widget.SeekBar sb) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(android.widget.SeekBar sb) {
+            }
+        });
+        box.addView(label);
+        box.addView(bar);
         box.addView(hint);
-        box.addView(input);
-        AlertDialog d = show(new AlertDialog.Builder(this)
-                .setTitle("Замедление")
+        show(new AlertDialog.Builder(this)
+                .setTitle("Скорость")
                 .setView(box)
                 .setPositiveButton("OK", (dlg, w) -> {
-                    int v;
-                    try {
-                        v = Integer.parseInt(input.getText().toString().trim());
-                    } catch (NumberFormatException e) {
-                        v = 1;
-                    }
-                    v = Math.max(1, Math.min(100, v));
-                    prefs.edit().putInt("slow", v).apply();
+                    prefs.edit().putInt("speedStep", bar.getProgress()).apply();
                     applySettings();
-                    toast(v == 1 ? "Реальная скорость" : "Замедление в " + v + " раз");
+                    if (prefs.getBoolean("micOn", false) && bar.getProgress() != Speed.REAL)
+                        toast("Пока включён вход с микрофона, скорость реальная");
                 })
-                .setNeutralButton("1 — реальная", (dlg, w) -> {
-                    prefs.edit().putInt("slow", 1).apply();
+                .setNeutralButton("Реальная", (dlg, w) -> {
+                    prefs.edit().putInt("speedStep", Speed.REAL).apply();
                     applySettings();
                 })
                 .setNegativeButton("Отмена", null));
-        input.requestFocus();
-        if (d.getWindow() != null)
-            d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
     }
 
     private static final String[] COLOR_NAMES = {"зелёный", "красный", "малиновый", "жёлтый", "голубой", "синий",
@@ -613,7 +641,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
 
     private void showVisualization() {
         boolean on = prefs.getBoolean("map", false);
-        boolean bytes = prefs.getInt("mapLayout", 0) == MemTrace.LAYOUT_BYTES;
+        int perLine = prefs.getInt("mapW", 1);
         int flash = prefs.getInt("flash", 5);
         String[] keys = {"colR", "colW2", "colRW", "colX"};
         int[] defs = {0xFF30FF40, 0xFFFF2A9E, 0xFFFFE030, 0xFF20E8FF};
@@ -642,11 +670,18 @@ public final class EmuActivity extends Activity implements MainView.Host {
                 showVisualization();
             }
         });
-        items.add("Вид карты: " + (bytes ? "байты (1 точка = 1 байт)" : "биты (1 точка = 1 бит)"));
+        items.add("Байт в строке карты: " + perLine + (perLine == 1 ? " (как у «Специалиста»)" : ""));
         acts.add(() -> {
-            prefs.edit().putInt("mapLayout", bytes ? MemTrace.LAYOUT_BITS : MemTrace.LAYOUT_BYTES).apply();
-            applySettings();
-            showVisualization();
+            String[] names = {"1 байт — шрифты, тайлы 8×8", "2 байта — спрайты 16 точек", "3 байта — спрайты 24 точки",
+                "4 байта — спрайты 32 точки"};
+            show(new AlertDialog.Builder(this)
+                    .setTitle("Байт в строке карты")
+                    .setSingleChoiceItems(names, perLine - 1, (d2, w) -> {
+                        prefs.edit().putInt("mapW", w + 1).apply();
+                        d2.dismiss();
+                        applySettings();
+                        showVisualization();
+                    }));
         });
         items.add("🎓  Экскурсия по памяти");
         acts.add(this::startTour);
@@ -769,9 +804,11 @@ public final class EmuActivity extends Activity implements MainView.Host {
                         + "на следующую клавишу (повторное нажатие — отмена). Белым на клавише — ключевое "
                         + "слово BASIC (в режиме K одна клавиша = целое слово), красным — символ с SYM, "
                         + "синим на цифрах — функция с CAPS (CAPS+0 — удалить, CAPS+5…8 — стрелки).\n\n"
-                        + "Пауза: нажмите на экран. Пока открыто меню, эмуляция тоже стоит.\n\n"
+                        + "Пауза: нажмите на экран. В паузе внизу экрана кнопки: на секунду и на одну команду "
+                        + "назад и вперёд; 4 секунды видны луч и текущая команда процессора с регистрами. "
+                        + "Назад можно уйти на 10 секунд. Пока открыто меню, эмуляция тоже стоит.\n\n"
                         + "Сохранения: у каждой игры своё. Значок 💾 в списках — у игры есть сохранение.\n\n"
-                        + "Замедление: от 1 (реальная скорость) до 100.\n\n"
+                        + "Скорость: от ×4 до 1 такта в секунду, каждый шаг ползунка — вдвое.\n\n"
                         + "Визуализация памяти: карта всех 64 КБ под экраном, байты вспыхивают при "
                         + "чтении, записи и исполнении; тап по карте — что это за адрес; есть экскурсия.\n\n"
                         + "Файлы: Android/data/com.alexspec.zx/files (папки programs и states), их видно "

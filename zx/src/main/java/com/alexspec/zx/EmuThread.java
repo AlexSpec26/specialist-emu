@@ -32,6 +32,7 @@ final class EmuThread extends Thread {
     /** bumped every time mapFrame is refreshed */
     volatile int mapVersion;
     private final short[] audioBuf = new short[8192];
+    private final short[] frameAudio = new short[2048];
     private final short[] outBuf = new short[2048];
     private final ConcurrentLinkedQueue<Runnable> queue = new ConcurrentLinkedQueue<>();
     private final Object lock = new Object();
@@ -42,8 +43,10 @@ final class EmuThread extends Thread {
     private volatile boolean userPaused;
     /** a posted task may have changed memory: redraw the picture while paused */
     private volatile boolean dirty;
-    /** Emulation speed relative to the real machine, 0.01 (1/100) .. 1. */
-    volatile float speed = 1f;
+    /** Emulation speed relative to the real machine: 4 (x4) down to 1 T-state per second. */
+    volatile double speed = 1;
+    /** T-states owed to the emulation at slow speeds (fractions carry over between frames) */
+    private double owed;
     volatile boolean sound = true;
     /** run the emulation fast while a real-time (non-instant) tape load is going on */
     volatile boolean turboLoad = true;
@@ -58,6 +61,14 @@ final class EmuThread extends Thread {
     }
 
     /** Runs {@code r} on the emulation thread between frames. */
+    /** like {@link #post} but keeps the picture as the task leaves it (single-stepping) */
+    void postKeepScreen(Runnable r) {
+        queue.add(r);
+        synchronized (lock) {
+            lock.notifyAll();
+        }
+    }
+
     void post(Runnable r) {
         dirty = true;
         queue.add(r);
@@ -169,18 +180,35 @@ final class EmuThread extends Thread {
                 continue;
             }
 
-            float sp = Math.max(0.01f, Math.min(1f, speed));
-            boolean turbo = turboLoad && sp >= 1f && tapeLoading();
+            double sp = Math.max(1.0 / Spectrum48.CPU_HZ, Math.min(4, speed));
+            boolean turbo = turboLoad && sp == 1 && tapeLoading();
             turboActive = turbo;
             int samples;
-            if (turbo) {
+            if (sp > 1) {
+                // x2 / x4: several frames per real frame, their sound squeezed together
+                int n = (int) Math.round(sp);
+                samples = 0;
+                for (int k = 0; k < n; k++) {
+                    int got = machine.runFrame(frameAudio);
+                    int fit = Math.min(got, audioBuf.length - samples);
+                    System.arraycopy(frameAudio, 0, audioBuf, samples, fit);
+                    samples += fit;
+                }
+            } else if (turbo) {
                 // ~10x: skip rendering of intermediate frames, keep the border stripes of the last
                 machine.runFast(9);
                 samples = machine.runFrame(audioBuf);
             } else if (sp >= 1f) {
                 samples = machine.runFrame(audioBuf);
             } else {
-                samples = machine.run(audioBuf, Math.round(Spectrum48.T_FRAME * sp), true, false);
+                owed += Spectrum48.T_FRAME * sp;
+                if (owed >= 1) {
+                    samples = machine.run(audioBuf, (long) owed, true, false);
+                    owed -= machine.lastRunT; // whole instructions: may go below zero, then we wait
+                } else {
+                    samples = 0;
+                }
+                if (sp < 1.0 / 64) samples = 0; // far too slow to be heard
             }
             // the trace clock follows real time, so flashes last the same at any emulation speed
             if (machine.trace.enabled) {

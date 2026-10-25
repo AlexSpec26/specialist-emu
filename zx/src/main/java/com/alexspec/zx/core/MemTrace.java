@@ -2,50 +2,57 @@ package com.alexspec.zx.core;
 
 /**
  * Records, per byte of the 64 KB address space, when it was last read, written and executed
- * (opcode or operand fetch), and renders a "live" memory map in one of two layouts:
- *
- * BITS:  1 bit = 1 pixel, a byte is a horizontal strip of 8 pixels (bit 7 on the left);
- *        memory is cut into 8 columns of 8 KB, each 32 bytes (256 pixels) wide and 256 rows
- *        high, consecutive addresses go left to right, then down: 2048 x 256 pixels. Rows are
- *        32 bytes like a line of the ZX screen, so 4000-57FF shows the screen bitmap in raw
- *        memory order (the famous "thirds" interleave) and 5800-5AFF its attributes.
- * BYTES: 1 byte = 1 pixel, 256 x 256: row = high byte, column = low byte (like a hex dump);
- *        brightness = number of 1 bits in the byte.
+ * (opcode or operand fetch), and renders a "live" memory map like the Specialist one:
+ * 1 bit = 1 pixel, consecutive lines go DOWN a column of 256 lines; each line holds
+ * {@link #layout} bytes (1..4) side by side, bit 7 on the left. A column therefore holds
+ * 256 x W bytes and is 8 x W pixels wide; the map is 2048 x 256 pixels (2064 for 3 bytes).
+ * Choosing the width of the game's graphics (1 byte for 8x8 tiles and fonts, 2 for 16-pixel
+ * sprites...) makes them appear as pictures.
  */
 public final class MemTrace {
-    public static final int MAP_W = 2048; // largest layout, for buffer sizing
+    /** largest width (3 bytes per line: 86 columns of 24 pixels), for buffer sizing */
+    public static final int MAP_W = 2064;
     public static final int MAP_H = 256;
 
-    public static final int LAYOUT_BITS = 0, LAYOUT_BYTES = 1;
-    /** current layout; read by the renderer and the UI */
-    public volatile int layout = LAYOUT_BITS;
+    /** bytes per map line, 1..4; read by the renderer and the UI */
+    public volatile int layout = 1;
 
     public static int width(int layout) {
-        return layout == LAYOUT_BITS ? 2048 : 256;
+        int w = w(layout), cols = (65536 + 256 * w - 1) / (256 * w);
+        return cols * 8 * w;
     }
 
     public static int height(int layout) {
-        return 256;
+        return MAP_H;
     }
 
     /** map pixels per byte horizontally */
     public static int cellW(int layout) {
-        return layout == LAYOUT_BITS ? 8 : 1;
+        return 8;
+    }
+
+    private static int w(int layout) {
+        return layout < 1 ? 1 : Math.min(4, layout);
     }
 
     /** top-left map pixel of a byte */
     public static int posX(int layout, int addr) {
-        return layout == LAYOUT_BITS ? (addr >> 13) * 256 + (addr & 31) * 8 : addr & 0xFF;
+        int w = w(layout), colBytes = 256 * w;
+        return (addr / colBytes) * w * 8 + (addr % w) * 8;
     }
 
     public static int posY(int layout, int addr) {
-        return layout == LAYOUT_BITS ? (addr >> 5) & 0xFF : addr >> 8;
+        int w = w(layout);
+        return (addr % (256 * w)) / w;
     }
 
     /** address under a map pixel, -1 outside */
     public static int addrAt(int layout, int x, int y) {
-        if (x < 0 || y < 0 || x >= width(layout) || y >= height(layout)) return -1;
-        return layout == LAYOUT_BITS ? ((x >> 8) << 13) | (y << 5) | ((x & 255) >> 3) : (y << 8) | x;
+        if (x < 0 || y < 0 || x >= width(layout) || y >= MAP_H) return -1;
+        int w = w(layout);
+        int col = x / (8 * w), k = (x % (8 * w)) / 8;
+        int a = col * 256 * w + y * w + k;
+        return a < 65536 ? a : -1;
     }
 
     public static final int KIND_NONE = 0, KIND_READ = 1, KIND_WRITE = 2, KIND_RW = 3, KIND_EXEC = 4;
@@ -172,31 +179,20 @@ public final class MemTrace {
     public synchronized void render(Mem mem, int[] out, int layout) {
         int n = flashFrames;
         int[] lvl = new int[1];
-        if (layout == LAYOUT_BITS) {
-            for (int addr = 0; addr < 65536; addr++) {
-                int v = mem.rawRead(addr);
-                int on = baseOn, off = baseOff;
-                int kind = kindAt(addr, lvl);
-                if (kind != KIND_NONE) {
-                    int l = Math.min(lvl[0], n - 1);
-                    on = palOn[kind][l];
-                    off = palOff[kind][l];
-                }
-                int p = ((addr >> 5) & 0xFF) * 2048 + (addr >> 13) * 256 + (addr & 31) * 8;
-                for (int b = 0; b < 8; b++, v <<= 1) out[p + b] = (v & 0x80) != 0 ? on : off;
+        int w = w(layout), colBytes = 256 * w, stride = width(layout);
+        java.util.Arrays.fill(out, 0, stride * MAP_H, baseOff);
+        for (int addr = 0; addr < 65536; addr++) {
+            int v = mem.rawRead(addr);
+            int on = baseOn, off = baseOff;
+            int kind = kindAt(addr, lvl);
+            if (kind != KIND_NONE) {
+                int l = Math.min(lvl[0], n - 1);
+                on = palOn[kind][l];
+                off = palOff[kind][l];
             }
-        } else {
-            for (int addr = 0; addr < 65536; addr++) {
-                int pop = Integer.bitCount(mem.rawRead(addr));
-                int on = baseOn, off = baseOff;
-                int kind = kindAt(addr, lvl);
-                if (kind != KIND_NONE) {
-                    int l = Math.min(lvl[0], n - 1);
-                    on = palOn[kind][l];
-                    off = palOff[kind][l];
-                }
-                out[addr] = pop == 0 ? off : pop == 8 ? on : mix(off, on, pop / 8f);
-            }
+            int o = addr % colBytes;
+            int p = (o / w) * stride + (addr / colBytes) * w * 8 + (o % w) * 8;
+            for (int b = 0; b < 8; b++, v <<= 1) out[p + b] = (v & 0x80) != 0 ? on : off;
         }
     }
 }

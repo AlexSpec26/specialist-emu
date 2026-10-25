@@ -270,6 +270,18 @@ public final class Tape {
         if (pos >= n) playing = false;
     }
 
+    /** player position, for machine snapshots */
+    public long[] saveState() {
+        return new long[]{pos, left, level ? 1 : 0, playing ? 1 : 0};
+    }
+
+    public void loadState(long[] st) {
+        pos = (int) st[0];
+        left = st[1];
+        level = st[2] != 0;
+        playing = st[3] != 0;
+    }
+
     /** progress 0..1 for the UI */
     public float progress() {
         return n == 0 ? 0 : (float) pos / n;

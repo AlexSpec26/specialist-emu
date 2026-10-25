@@ -84,6 +84,8 @@ final class MapPanel {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint bmpPaint = new Paint();
     private final TextPaint tp = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    /** own paint for the tutorial text: StaticLayout keeps using the paint it was built with */
+    private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Matrix matrix = new Matrix();
 
     MapPanel(EmuThread emu, Host host, float dp) {
@@ -488,9 +490,9 @@ final class MapPanel {
         float textTop = r.top + pad + 26 * dp, textBottom = btnPrev.top - 8 * dp;
         float tw = r.width() - 2 * pad;
         if (textLayout == null || layoutStep != step || layoutWidth != tw || st.stack) {
-            tp.setTextSize(14 * dp);
-            tp.setColor(0xFFE0E0E8);
-            textLayout = StaticLayout.Builder.obtain(text, 0, text.length(), tp, (int) tw)
+            textPaint.setTextSize(14 * dp);
+            textPaint.setColor(0xFFE0E0E8);
+            textLayout = StaticLayout.Builder.obtain(text, 0, text.length(), textPaint, (int) tw)
                     .setAlignment(Layout.Alignment.ALIGN_NORMAL)
                     .setLineSpacing(2 * dp, 1f)
                     .build();
@@ -503,7 +505,6 @@ final class MapPanel {
         c.save();
         c.clipRect(r.left + pad, textTop, r.right - pad, textBottom);
         c.translate(r.left + pad, textTop - textScroll);
-        tp.setColor(0xFFE0E0E8);
         textLayout.draw(c);
         c.restore();
         if (maxScroll > 0) {

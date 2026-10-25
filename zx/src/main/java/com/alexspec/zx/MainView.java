@@ -34,6 +34,9 @@ final class MainView extends View {
         void onKeyPicked(int code);
 
         void onPickCancelled();
+
+        /** pause controls: 0 = 1 s back, 1 = one instruction back, 2 = one forward, 3 = 1 s forward */
+        void onStep(int kind);
     }
 
     private static final int T_NONE = -1;
@@ -44,6 +47,7 @@ final class MainView extends View {
     private static final int T_SCREEN = -6;
     private static final int T_MAP = -7;
     private static final int T_PANEL = -8;
+    private static final int T_STEP = 3000;
     private static final int T_BUTTON = 1000;
     private static final int T_KEY = 2000;
 
@@ -62,7 +66,8 @@ final class MainView extends View {
     String title = "";
     /** Shown as an overlay; the emulation itself is paused by the activity. */
     boolean paused;
-    float speed = 1f;
+    /** speed shown over the screen (null at real speed) */
+    String speedBadge;
     /** live memory map under the screen (portrait only) */
     boolean mapOn;
     /** live tape input (microphone), for the level indicator; null when off */
@@ -81,6 +86,16 @@ final class MainView extends View {
     /** called when the tutorial is closed (so the owner can re-layout) */
     Runnable onTutorialClosed;
     private final RectF menuRect = new RectF();
+    private final RectF[] stepRects = {new RectF(), new RectF(), new RectF(), new RectF()};
+    private static final String[] STEP_LABELS = {"⏪ 1 с", "◀ 1", "1 ▶", "1 с ⏩"};
+    /** beam and current instruction are shown until this time (ms) */
+    private long infoUntil;
+
+    /** show the beam and the current instruction for 4 seconds */
+    void showMachineInfo() {
+        infoUntil = System.currentTimeMillis() + 4000;
+        invalidate();
+    }
     private final RectF kbdBtnRect = new RectF();
     private final RectF kbdRect = new RectF();
     private final RectF joyZone = new RectF();
@@ -322,7 +337,7 @@ final class MainView extends View {
             mapVisible = mapOn;
             if (mapVisible) {
                 // memory map right under the toolbar; controls float over it (semi-transparent)
-                boolean bits = emu.machine.trace.layout == MemTrace.LAYOUT_BITS;
+                boolean bits = true;
                 // bits: the 8:1 strip fits the width, the extra height is room for zooming in
                 float mh = bits ? w / 2f : Math.min(w, regionH - 60 * dp);
                 float panelTop = Math.min(top + mh + 6 * dp, bottom - 280 * dp);
@@ -435,10 +450,12 @@ final class MainView extends View {
             c.drawText("нажмите на экран, чтобы продолжить", screenRect.centerX(),
                     screenRect.centerY() + screenRect.height() * 0.12f, text);
         }
+        if (System.currentTimeMillis() < infoUntil) drawMachineInfo(c);
+        if (paused && pickPrompt == null) drawStepButtons(c);
         if (tape != null) drawTapeIndicator(c);
         else drawCassette(c);
-        if (Math.abs(speed - 1f) > 0.001f) {
-            String sp = "1/" + Math.round(1f / speed);
+        if (speedBadge != null) {
+            String sp = speedBadge;
             text.setTextSize(13 * dp);
             float tw = text.measureText(sp) + 12 * dp;
             fill.setColor(0xCC3A5BD9);
@@ -522,6 +539,73 @@ final class MainView extends View {
         c.drawText("📼 " + s, x + 5 * dp, y + 15 * dp, text);
         text.setTextAlign(Paint.Align.CENTER);
         postInvalidateDelayed(250);
+    }
+
+    private void layoutStepButtons() {
+        float h = Math.min(44 * dp, screenRect.height() * 0.16f);
+        float gap = 6 * dp;
+        float w = (screenRect.width() - gap * 5) / 4f;
+        float y = screenRect.bottom - h - gap;
+        for (int i = 0; i < 4; i++) {
+            float x = screenRect.left + gap + i * (w + gap);
+            stepRects[i].set(x, y, x + w, y + h);
+        }
+    }
+
+    private void drawStepButtons(Canvas c) {
+        layoutStepButtons();
+        for (int i = 0; i < 4; i++) {
+            RectF r = stepRects[i];
+            fill.setColor(0xDD2A3A80);
+            c.drawRoundRect(r, 9 * dp, 9 * dp, fill);
+            text.setColor(Color.WHITE);
+            text.setTextSize(Math.min(r.height() * 0.42f, 16 * dp));
+            c.drawText(STEP_LABELS[i], r.centerX(), r.centerY() + text.getTextSize() * 0.36f, text);
+        }
+    }
+
+    /** beam position (crosshair) and the instruction at PC with the registers */
+    private void drawMachineInfo(Canvas c) {
+        com.alexspec.zx.core.Z80 z = machine.cpu;
+        int[] b = machine.beam();
+        float sx = screenRect.width() / Spectrum48.WIDTH, sy = screenRect.height() / Spectrum48.HEIGHT;
+        if (b != null) {
+            float x = screenRect.left + (b[0] + 0.5f) * sx, y = screenRect.top + (b[1] + 0.5f) * sy;
+            stroke.setStrokeWidth(1.5f * dp);
+            stroke.setColor(0xCCFF3030);
+            c.drawLine(screenRect.left, y, screenRect.right, y, stroke);
+            c.drawLine(x, screenRect.top, x, screenRect.bottom, stroke);
+            fill.setColor(0xFFFFFF40);
+            c.drawCircle(x, y, 3.5f * dp, fill);
+        }
+        int[] len = new int[1];
+        String ins = com.alexspec.zx.core.Z80Dis.dis(machine, z.pc, len);
+        StringBuilder hex = new StringBuilder();
+        for (int k = 0; k < len[0]; k++) hex.append(String.format("%02X", machine.rawRead(z.pc + k)));
+        long t = z.t;
+        int line = (int) (t / Spectrum48.T_LINE);
+        String l1 = String.format(java.util.Locale.US, "%04X  %-8s %s", z.pc, hex, ins);
+        String l2 = String.format(java.util.Locale.US, "AF %04X BC %04X DE %04X HL %04X", z.af(), z.bc(), z.de(), z.hl());
+        String l3 = String.format(java.util.Locale.US, "IX %04X IY %04X SP %04X IM%d %s", z.ix, z.iy, z.sp, z.im, z.iff1 ? "EI" : "DI");
+        String l4 = String.format(java.util.Locale.US, "кадр %d, такт %d (строка %d, %d)", machine.frames(), t, line, t % Spectrum48.T_LINE);
+        String[] lines = {l1, l2, l3, l4};
+        android.graphics.Typeface old = text.getTypeface();
+        text.setTypeface(android.graphics.Typeface.MONOSPACE);
+        text.setTextAlign(Paint.Align.LEFT);
+        float ts = Math.min(13 * dp, screenRect.width() / 30f);
+        text.setTextSize(ts);
+        float lh = ts * 1.25f, pad = 5 * dp, maxW = 0;
+        for (String l : lines) maxW = Math.max(maxW, text.measureText(l));
+        float bx = screenRect.left + 6 * dp, by = screenRect.top + 30 * dp;
+        fill.setColor(0xD0101018);
+        c.drawRoundRect(bx, by, bx + maxW + 2 * pad, by + lh * lines.length + pad, 6 * dp, 6 * dp, fill);
+        for (int i = 0; i < lines.length; i++) {
+            text.setColor(i == 0 ? 0xFFFFFF60 : 0xFFD0D0DA);
+            c.drawText(lines[i], bx + pad, by + pad + (i + 0.8f) * lh, text);
+        }
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTypeface(old);
+        postInvalidateDelayed(Math.max(16, infoUntil - System.currentTimeMillis()));
     }
 
     /** applies the user's control opacity to a colour */
@@ -642,6 +726,10 @@ final class MainView extends View {
     private int hitTest(float x, float y) {
         if (inflate(menuRect, 8 * dp).contains(x, y)) return T_MENU;
         if (inflate(kbdBtnRect, 8 * dp).contains(x, y)) return T_KBD;
+        if (paused && pickPrompt == null) {
+            layoutStepButtons();
+            for (int i = 0; i < 4; i++) if (stepRects[i].contains(x, y)) return T_STEP + i;
+        }
         if (screenRect.contains(x, y) && !(keyboardVisible && kbdRect.contains(x, y))) return T_SCREEN;
         if (keyboardVisible) {
             if (kbdRect.contains(x, y)) {
@@ -764,6 +852,12 @@ final class MainView extends View {
     }
 
     private void press(int id, int t, float x, float y) {
+        if (t >= T_STEP) {
+            haptic();
+            host.onStep(t - T_STEP);
+            showMachineInfo();
+            return;
+        }
         if (t == T_MENU || t == T_KBD || t == T_SCREEN) {
             haptic();
             return;
@@ -822,6 +916,7 @@ final class MainView extends View {
     }
 
     private void release(int id, int t) {
+        if (t >= T_STEP) return;
         if (t == T_MAP) {
             map.up(id, lastUpX, lastUpY);
             return;

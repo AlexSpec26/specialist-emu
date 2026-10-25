@@ -44,10 +44,7 @@ final class MapPanel {
     String programTitle = "";
 
     // pictures from the emulation thread
-    private final Bitmap[] bmp = {
-        Bitmap.createBitmap(MemTrace.width(MemTrace.LAYOUT_BITS), MemTrace.height(MemTrace.LAYOUT_BITS), Bitmap.Config.ARGB_8888),
-        Bitmap.createBitmap(MemTrace.width(MemTrace.LAYOUT_BYTES), MemTrace.height(MemTrace.LAYOUT_BYTES), Bitmap.Config.ARGB_8888),
-    };
+    private Bitmap bmp = Bitmap.createBitmap(MemTrace.width(1), MemTrace.MAP_H, Bitmap.Config.ARGB_8888);
     private final int[] pix = new int[MemTrace.MAP_W * MemTrace.MAP_H];
     private int shownVersion = -1;
     private int shownLayout = -1;
@@ -84,6 +81,8 @@ final class MapPanel {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint bmpPaint = new Paint();
     private final TextPaint tp = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    /** own paint for the tutorial text: StaticLayout keeps using the paint it was built with */
+    private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Matrix matrix = new Matrix();
 
     MapPanel(EmuThread emu, Host host, float dp) {
@@ -117,7 +116,7 @@ final class MapPanel {
     private float maxZoom() {
         // bits: up to ~10 screen px per bit; bytes: up to ~80 px per byte (bits ~10 px)
         float base = Math.min(rect.width() / cw(), rect.height() / ch());
-        return Math.max(1f, (layout() == MemTrace.LAYOUT_BITS ? 10f : 80f) * dp / 2.75f / base);
+        return Math.max(1f, 10f * dp / 2.75f / base);
     }
 
     private void clampView() {
@@ -168,7 +167,9 @@ final class MapPanel {
                 int n = MemTrace.width(got) * MemTrace.height(got);
                 System.arraycopy(emu.mapFrame, 0, pix, 0, n);
             }
-            bmp[got].setPixels(pix, 0, MemTrace.width(got), 0, 0, MemTrace.width(got), MemTrace.height(got));
+            if (bmp.getWidth() != MemTrace.width(got))
+                bmp = Bitmap.createBitmap(MemTrace.width(got), MemTrace.MAP_H, Bitmap.Config.ARGB_8888);
+            bmp.setPixels(pix, 0, MemTrace.width(got), 0, 0, MemTrace.width(got), MemTrace.height(got));
             shownVersion = ver;
             shownLayout = got;
         }
@@ -181,8 +182,7 @@ final class MapPanel {
             matrix.reset();
             matrix.postScale(s, s);
             matrix.postTranslate(toScreenX(0), toScreenY(0));
-            c.drawBitmap(bmp[layout], matrix, bmpPaint);
-            if (layout == MemTrace.LAYOUT_BYTES && s >= 16 * dp / 2.75f) drawByteDetail(c, s);
+            c.drawBitmap(bmp, matrix, bmpPaint);
         }
 
         // tutorial highlight: dim everything except the step's region
@@ -232,43 +232,6 @@ final class MapPanel {
         if (step >= 0) drawPanel(c);
     }
 
-    /** byte layout zoomed in: draw the bits of the visible bytes as 8 thin bars per cell */
-    private void drawByteDetail(Canvas c, float s) {
-        int c0 = Math.max(0, (int) Math.floor(toMapX(rect.left)));
-        int c1 = Math.min(255, (int) Math.floor(toMapX(rect.right)));
-        int r0 = Math.max(0, (int) Math.floor(toMapY(rect.top)));
-        int r1 = Math.min(255, (int) Math.floor(toMapY(rect.bottom)));
-        int nc = c1 - c0 + 1, nr = r1 - r0 + 1;
-        if (nc <= 0 || nr <= 0) return;
-        int w = nc * 8;
-        int[] px = new int[w * nr];
-        int[] col = new int[2];
-        for (int r = 0; r < nr; r++) {
-            for (int k = 0; k < nc; k++) {
-                int addr = ((r0 + r) << 8) | (c0 + k);
-                int v = machine.rawRead(addr);
-                trace.colors(addr, col);
-                int p = r * w + k * 8;
-                for (int b = 0; b < 8; b++, v <<= 1) px[p + b] = (v & 0x80) != 0 ? col[0] : col[1];
-            }
-        }
-        Bitmap detail = Bitmap.createBitmap(px, w, nr, Bitmap.Config.ARGB_8888);
-        RectF dst = new RectF(toScreenX(c0), toScreenY(r0), toScreenX(c1 + 1), toScreenY(r1 + 1));
-        c.drawBitmap(detail, null, dst, bmpPaint);
-        // thin separators between bytes
-        paint.setStyle(Paint.Style.FILL);
-        paint.setColor(0x66000000);
-        for (int k = c0; k <= c1 + 1; k++) {
-            float x = toScreenX(k);
-            c.drawRect(x - 0.5f, dst.top, x + 0.5f, dst.bottom, paint);
-        }
-        for (int r = r0; r <= r1 + 1; r++) {
-            float y = toScreenY(r);
-            c.drawRect(dst.left, y - 0.5f, dst.right, y + 0.5f, paint);
-        }
-        detail.recycle();
-    }
-
     private int[][] stepRanges(Tutorial.Step st) {
         if (st.dynamic == Tutorial.STACK) {
             int sp = machine.cpu.sp & 0xFFFF;
@@ -311,45 +274,38 @@ final class MapPanel {
         return p;
     }
 
-    /** map-space rectangles covering addresses a..b */
+    /** map-space rectangles covering addresses a..b (columns of 256 lines, W bytes per line) */
     static List<RectF> rangeRects(int layout, int a, int b) {
         List<RectF> out = new ArrayList<>();
-        if (layout == MemTrace.LAYOUT_BITS) {
-            // 8 columns of 8 KB, each 32 bytes (256 px) wide and 256 rows high
-            for (int col = a >> 13; col <= b >> 13; col++) {
-                int lo = Math.max(a, col << 13), hi = Math.min(b, (col << 13) | 0x1FFF);
-                int x0 = col * 256;
-                int r0 = (lo >> 5) & 255, r1 = (hi >> 5) & 255;
-                if (r0 == r1) {
-                    out.add(new RectF(x0 + (lo & 31) * 8, r0, x0 + ((hi & 31) + 1) * 8, r0 + 1));
-                    continue;
-                }
-                int full0 = r0, full1 = r1;
-                if ((lo & 31) != 0) {
-                    out.add(new RectF(x0 + (lo & 31) * 8, r0, x0 + 256, r0 + 1));
-                    full0++;
-                }
-                if ((hi & 31) != 31) {
-                    out.add(new RectF(x0, r1, x0 + ((hi & 31) + 1) * 8, r1 + 1));
-                    full1--;
-                }
-                if (full1 >= full0) out.add(new RectF(x0, full0, x0 + 256, full1 + 1));
+        int w = Math.max(1, Math.min(4, layout)), colBytes = 256 * w;
+        for (int col = a / colBytes; col <= b / colBytes; col++) {
+            int lo = Math.max(a, col * colBytes), hi = Math.min(b, col * colBytes + colBytes - 1);
+            int x0 = col * w * 8;
+            int r0 = (lo % colBytes) / w, r1 = (hi % colBytes) / w;
+            int k0 = lo % w, k1 = hi % w;
+            if (r0 == r1) {
+                out.add(new RectF(x0 + k0 * 8, r0, x0 + (k1 + 1) * 8, r0 + 1));
+                continue;
             }
-        } else {
-            int r0 = a >> 8, r1 = b >> 8;
-            for (int row = r0; row <= r1; row++) {
-                int x0 = row == r0 ? a & 255 : 0, x1 = row == r1 ? b & 255 : 255;
+            int full0 = r0, full1 = r1;
+            if (k0 != 0) {
+                out.add(new RectF(x0 + k0 * 8, r0, x0 + w * 8, r0 + 1));
+                full0++;
+            }
+            if (k1 != w - 1) {
+                out.add(new RectF(x0, r1, x0 + (k1 + 1) * 8, r1 + 1));
+                full1--;
+            }
+            if (full1 >= full0) {
                 RectF last = out.isEmpty() ? null : out.get(out.size() - 1);
-                if (last != null && x0 == 0 && x1 == 255 && last.left == 0 && last.right == 256 && last.bottom == row) {
-                    last.bottom += 1;
-                } else {
-                    out.add(new RectF(x0, row, x1 + 1, row + 1));
-                }
+                // merge whole columns into one rectangle
+                if (last != null && full0 == 0 && full1 == 255 && last.top == 0 && last.bottom == 256 && last.right == x0)
+                    last.right = x0 + w * 8;
+                else out.add(new RectF(x0, full0, x0 + w * 8, full1 + 1));
             }
         }
         return out;
     }
-
 
     private void drawInfo(Canvas c, int layout) {
         String[] lines = describe(inspectAddr);
@@ -608,9 +564,9 @@ final class MapPanel {
         float textTop = r.top + pad + 26 * dp, textBottom = btnPrev.top - 8 * dp;
         float tw = r.width() - 2 * pad;
         if (textLayout == null || layoutStep != step || layoutWidth != tw || st.dynamic != Tutorial.NONE) {
-            tp.setTextSize(14 * dp);
-            tp.setColor(0xFFE0E0E8);
-            textLayout = StaticLayout.Builder.obtain(text, 0, text.length(), tp, (int) tw)
+            textPaint.setTextSize(14 * dp);
+            textPaint.setColor(0xFFE0E0E8);
+            textLayout = StaticLayout.Builder.obtain(text, 0, text.length(), textPaint, (int) tw)
                     .setAlignment(Layout.Alignment.ALIGN_NORMAL)
                     .setLineSpacing(2 * dp, 1f)
                     .build();
@@ -623,7 +579,6 @@ final class MapPanel {
         c.save();
         c.clipRect(r.left + pad, textTop, r.right - pad, textBottom);
         c.translate(r.left + pad, textTop - textScroll);
-        tp.setColor(0xFFE0E0E8);
         textLayout.draw(c);
         c.restore();
         if (maxScroll > 0) {

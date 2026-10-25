@@ -71,7 +71,7 @@ public final class Z80 {
     /** T-states since the start of the frame */
     public long t;
     /** set by EI: interrupts are not accepted until after the next instruction */
-    private boolean eiDelay;
+    boolean eiDelay; // package access: machine snapshots
     /** last instruction was a DD/FD prefixed one (for the interrupt check after prefixes) */
 
     public Z80(Bus bus) {

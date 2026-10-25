@@ -113,6 +113,8 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         script = null;
         java.util.Arrays.fill(scriptRows, 0);
         reset();
+        frameOpen = false;
+        histCount = 0;
     }
 
     // ------------------------------------------------------------------ bus
@@ -167,10 +169,10 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         if ((port & 1) == 0) {
             int hi = port >> 8, keys = 0;
             for (int r = 0; r < 8; r++)
-                if ((hi & (1 << r)) == 0) keys |= rows.get(r) | scriptRows[r];
+                if ((hi & (1 << r)) == 0) keys |= (replaying ? replayKeys[r] : rows.get(r)) | scriptRows[r];
             return 0xA0 | (~keys & 0x1F) | (earIn() ? 0x40 : 0);
         }
-        if ((port & 0x20) == 0) return kempston & 0x1F;
+        if ((port & 0x20) == 0) return (replaying ? replayKeys[8] : kempston) & 0x1F;
         return floatingBus();
     }
 
@@ -295,6 +297,11 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         return frameCount;
     }
 
+    /** instructions executed since power-on (the unit of single-stepping) */
+    public long instr;
+    /** T-states executed by the last {@link #run} call */
+    public long lastRunT;
+
     private void beginFrame() {
         nextRow = 0;
         bLogPos = 0;
@@ -302,6 +309,38 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         scriptFrame();
         wasLoading = false;
         frameOpen = true;
+        if (historyOn) pushHistory();
+        if (replaying) {
+            // use the keys that were held when this frame really ran
+            long now = time();
+            for (int k = 0; k < histCount; k++) {
+                Snap h = hist[(histHead + HISTORY - 1 - k) % HISTORY];
+                if (h.abs <= now) {
+                    System.arraycopy(h.keys, 0, replayKeys, 0, 9);
+                    break;
+                }
+            }
+        }
+    }
+
+    private boolean replaying;
+    private final int[] replayKeys = new int[9];
+
+    /** re-executes up to the target, then forgets the history after it */
+    private void replay(long targetInstr, long targetAbs) {
+        replaying = true;
+        pixels = screen;
+        try {
+            while (instr < targetInstr && time() < targetAbs) stepOne();
+        } finally {
+            replaying = false;
+            pixels = null;
+        }
+        long now = time();
+        while (histCount > 0 && hist[(histHead + HISTORY - 1) % HISTORY].abs > now) {
+            histHead = (histHead + HISTORY - 1) % HISTORY;
+            histCount--;
+        }
     }
 
     private void endFrame() {
@@ -317,44 +356,49 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         frameOpen = false;
     }
 
+    /** one instruction (plus an interrupt it may take first); returns the T-states used */
+    private long stepOne() {
+        if (!frameOpen) beginFrame();
+        long t0 = cpu.t;
+        if (cpu.t < 32) cpu.interrupt();
+        int pc = cpu.pc;
+        boolean trapped = false;
+        if (pc == 0x0556) {
+            wasLoading = true;
+            trapped = romLoad();
+        } else if (pc >= 0x05E3 && pc < 0x0605) {
+            wasLoading = true; // inside LD-EDGE: waiting for the tape
+        }
+        if (!trapped) {
+            long t1 = cpu.t;
+            cpu.step();
+            int dt = (int) (cpu.t - t1);
+            Tape tp = tape;
+            if (tp != null) tp.advance(dt);
+            cycleCount += dt;
+            audioStep(dt);
+        }
+        instr++;
+        long used = cpu.t - t0;
+        while (nextRow < HEIGHT && cpu.t >= rowDue(nextRow)) renderRow(nextRow++);
+        if (cpu.t >= T_FRAME) endFrame();
+        return used;
+    }
+
     /**
      * Runs about {@code budget} T-states (any number, frames continue across calls), drawing into
      * {@link #screen} if {@code render}. Audio samples go to {@code audio} (may be null);
      * returns the number of samples written. With {@code toFrameEnd} it stops exactly at the end
      * of the current frame instead.
      */
-    public int run(short[] audio, int budget, boolean render, boolean toFrameEnd) {
+    public int run(short[] audio, long budget, boolean render, boolean toFrameEnd) {
         pixels = render ? screen : null;
         audioOut = audio;
         audioPos = 0;
         long done = 0;
-        while (toFrameEnd || done < budget) {
-            if (!frameOpen) beginFrame();
-            if (cpu.t < 32) cpu.interrupt();
-            int pc = cpu.pc;
-            long t0 = cpu.t;
-            boolean trapped = false;
-            if (pc == 0x0556) {
-                wasLoading = true;
-                trapped = romLoad();
-            } else if (pc >= 0x05E3 && pc < 0x0605) {
-                wasLoading = true; // inside LD-EDGE: waiting for the tape
-            }
-            if (!trapped) {
-                cpu.step();
-                int dt = (int) (cpu.t - t0);
-                Tape tp = tape;
-                if (tp != null) tp.advance(dt);
-                cycleCount += dt;
-                audioStep(dt);
-            }
-            done += cpu.t - t0;
-            while (nextRow < HEIGHT && cpu.t >= rowDue(nextRow)) renderRow(nextRow++);
-            if (cpu.t >= T_FRAME) {
-                endFrame();
-                if (toFrameEnd) break;
-            }
-        }
+        int f0 = frameCount;
+        while (toFrameEnd ? frameCount == f0 : done < budget) done += stepOne();
+        lastRunT = done;
         pixels = null;
         audioOut = null;
         return audioPos;
@@ -368,6 +412,158 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
     /** Runs frames without rendering or audio (fast-forward). */
     public void runFast(int n) {
         for (int k = 0; k < n; k++) run(null, 0, false, true);
+    }
+
+    /** absolute emulated time in T-states since power-on */
+    public long time() {
+        return (long) frameCount * T_FRAME + cpu.t;
+    }
+
+    /** Executes exactly one instruction, drawing the beam's progress. */
+    public void stepInstruction() {
+        pixels = screen;
+        stepOne();
+        pixels = null;
+    }
+
+    /** Runs forward {@code t} T-states (whole instructions) with drawing, no sound. */
+    public void forward(long t) {
+        long end = time() + t;
+        pixels = screen;
+        while (time() < end) stepOne();
+        pixels = null;
+    }
+
+    // ------------------------------------------------------------------ history (going back)
+
+    /** machine state at the start of a frame */
+    private static final class Snap {
+        final byte[] ram = new byte[0xC000];
+        final int[] regs = new int[40];
+        /** keys held during this frame (8 half-rows + Kempston), replayed when going back */
+        final int[] keys = new int[9];
+        long instr, cycles, abs;
+        Tape tape;
+        long[] tapeState;
+        int[][] script;
+        final int[] scriptRows = new int[8];
+    }
+
+    /** frames kept for going back (10 s) */
+    public static final int HISTORY = 500;
+    private final Snap[] hist = new Snap[HISTORY];
+    private int histHead, histCount;
+    public volatile boolean historyOn = true;
+
+    private void pushHistory() {
+        if (replaying) return;
+        if (histCount > 0) {
+            Snap last = hist[(histHead + HISTORY - 1) % HISTORY];
+            if (last.instr == instr) return; // already have this point (after a restore)
+        }
+        Snap s = hist[histHead];
+        if (s == null) s = hist[histHead] = new Snap();
+        histHead = (histHead + 1) % HISTORY;
+        if (histCount < HISTORY) histCount++;
+        System.arraycopy(mem, 0x4000, s.ram, 0, 0xC000);
+        Z80 c = cpu;
+        int[] r = s.regs;
+        int i = 0;
+        for (int v : new int[]{c.a, c.f, c.b, c.c, c.d, c.e, c.h, c.l, c.a_, c.f_, c.b_, c.c_, c.d_, c.e_, c.h_, c.l_,
+            c.ix, c.iy, c.sp, c.pc, c.i, c.getR(), c.memptr, c.im, c.iff1 ? 1 : 0, c.iff2 ? 1 : 0, c.halted ? 1 : 0,
+            c.eiDelay ? 1 : 0, (int) c.t, border, ear ? 1 : 0, mic ? 1 : 0, frameStartBorder, frameCount,
+            romLoaderFrames, progStart, progEnd, scriptPos, scriptTimer}) r[i++] = v;
+        for (int k = 0; k < 8; k++) s.keys[k] = rows.get(k);
+        s.keys[8] = kempston;
+        s.instr = instr;
+        s.cycles = cycleCount;
+        s.abs = time();
+        s.tape = tape;
+        s.tapeState = tape != null ? tape.saveState() : null;
+        s.script = script;
+        System.arraycopy(scriptRows, 0, s.scriptRows, 0, 8);
+    }
+
+    private void restore(Snap s) {
+        System.arraycopy(s.ram, 0, mem, 0x4000, 0xC000);
+        Z80 c = cpu;
+        int[] r = s.regs;
+        c.a = r[0]; c.f = r[1]; c.b = r[2]; c.c = r[3]; c.d = r[4]; c.e = r[5]; c.h = r[6]; c.l = r[7];
+        c.a_ = r[8]; c.f_ = r[9]; c.b_ = r[10]; c.c_ = r[11]; c.d_ = r[12]; c.e_ = r[13]; c.h_ = r[14]; c.l_ = r[15];
+        c.ix = r[16]; c.iy = r[17]; c.sp = r[18]; c.pc = r[19]; c.i = r[20]; c.setR(r[21]); c.memptr = r[22]; c.im = r[23];
+        c.iff1 = r[24] != 0; c.iff2 = r[25] != 0; c.halted = r[26] != 0; c.eiDelay = r[27] != 0; c.t = r[28];
+        border = r[29]; ear = r[30] != 0; mic = r[31] != 0; frameStartBorder = r[32]; frameCount = r[33];
+        romLoaderFrames = r[34]; progStart = r[35]; progEnd = r[36]; scriptPos = r[37]; scriptTimer = r[38];
+        instr = s.instr;
+        cycleCount = s.cycles;
+        tape = s.tape;
+        if (s.tape != null && s.tapeState != null) s.tape.loadState(s.tapeState);
+        script = s.script;
+        System.arraycopy(s.scriptRows, 0, scriptRows, 0, 8);
+        bLogN = 0;
+        frameOpen = false;
+        renderStatic();
+    }
+
+    /** latest snapshot at or before the condition; null if none */
+    private Snap findSnap(long targetInstr, long targetAbs) {
+        Snap best = null;
+        for (int k = 0; k < histCount; k++) {
+            Snap s = hist[(histHead + HISTORY - 1 - k) % HISTORY];
+            if (s.instr <= targetInstr && s.abs <= targetAbs) return s;
+            best = s; // oldest seen so far
+        }
+        return best == null ? null : best;
+    }
+
+    /**
+     * Goes back {@code n} instructions; returns false if the history does not reach that far
+     * (then the oldest kept point is restored).
+     */
+    public boolean backInstructions(long n) {
+        long target = instr - n;
+        Snap s = findSnap(target, Long.MAX_VALUE);
+        if (s == null) return false;
+        restore(s);
+        replay(target, Long.MAX_VALUE);
+        return s.instr <= target;
+    }
+
+    /** Goes back {@code t} T-states of emulated time (to an instruction boundary). */
+    public boolean backTime(long t) {
+        long target = time() - t;
+        Snap s = findSnap(Long.MAX_VALUE, target);
+        if (s == null) return false;
+        restore(s);
+        boolean ok = s.abs <= target;
+        if (ok) replay(Long.MAX_VALUE, target);
+        return ok;
+    }
+
+    /** seconds of history currently available */
+    public float historySeconds() {
+        if (histCount == 0) return 0;
+        Snap oldest = hist[(histHead + HISTORY - histCount) % HISTORY];
+        return (time() - oldest.abs) / (float) CPU_HZ;
+    }
+
+    public void clearHistory() {
+        histCount = 0;
+    }
+
+    /** where the beam is now, in screen pixels {x, y}; null during vertical blanking */
+    public int[] beam() {
+        int t = (int) cpu.t;
+        int line = t / T_LINE, pos = t % T_LINE;
+        int x;
+        if (pos < 144) x = BORDER + pos * 2;
+        else if (pos >= 208) {
+            x = BORDER - (T_LINE - pos) * 2;
+            line++;
+        } else x = WIDTH - 1; // horizontal retrace: park at the right edge
+        int row = line - FIRST_LINE;
+        if (row < 0 || row >= HEIGHT) return null;
+        return new int[]{Math.max(0, Math.min(WIDTH - 1, x)), row};
     }
 
     private static int rowDue(int row) {
@@ -663,6 +859,8 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         bLogN = 0;
         script = null;
         java.util.Arrays.fill(scriptRows, 0);
+        frameOpen = false;
+        histCount = 0;
         releaseAllKeys();
     }
 }
