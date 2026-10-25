@@ -16,25 +16,24 @@ android {
         versionName "1.0.${runNumber}"
     }
 
-    // Release signing key (ADR-011/ADR-014): in CI it comes from GitHub secrets via environment
-    // variables; without them (until the secrets exist) the old key from the repository is used.
+    // Release signing key (ADR-014): only from GitHub secrets, passed by CI as environment
+    // variables. Without them the release APK is unsigned and debug uses the standard debug key.
     def ksPath = System.getenv("SIGNING_KEYSTORE")
     signingConfigs {
-        emu {
-            storeFile ksPath ? file(ksPath) : file('emu.keystore')
-            storePassword System.getenv("SIGNING_STORE_PASSWORD") ?: 'specialist'
-            keyAlias System.getenv("SIGNING_KEY_ALIAS") ?: 'emu'
-            keyPassword System.getenv("SIGNING_KEY_PASSWORD") ?: 'specialist'
+        if (ksPath) {
+            release {
+                storeFile file(ksPath)
+                storePassword System.getenv("SIGNING_STORE_PASSWORD")
+                keyAlias System.getenv("SIGNING_KEY_ALIAS")
+                keyPassword System.getenv("SIGNING_KEY_PASSWORD")
+            }
         }
     }
 
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.emu
-        }
-        debug {
-            signingConfig signingConfigs.emu
+            if (ksPath) signingConfig signingConfigs.release
         }
     }
 

@@ -4,7 +4,7 @@
 - Branch: main (короткие ветки на задачу пока не заводились — см. OPS-002)
 - Last pushed commit: см. `git log -1` (коммит «Project memory...»); код ROM этапа 1 — 26fb442
 - Open PR: нет
-- Active backlog IDs: OPS-001 (ждёт выбора A/B владельца), ROM-001 (следующий)
+- Active backlog IDs: ROM-001 (следующий)
 - User-approved goal for this session: «начнем с ядра и совместимости, а дальше посмотрим»
   (ROM этап 1 — сделан); затем «структурируй и запиши все» (память проекта — сделано)
 
@@ -24,7 +24,6 @@
 ## Known problems and risks
 - Медленный вывод текста (ROM-001).
 - Treasure/Treasure 2: пейзаж другой (ROM-Q1). Заморозка будет портить экран игры (ROM-Q2).
-- Ключ подписи в репозитории (OPS-001).
 
 ## Decisions made or proposed
 - Принятые: ADR-002…012. Предложено: ADR-013 (как изолировать продукты).
@@ -38,5 +37,4 @@
    ARCHITECTURE «Внешние тестовые ресурсы»).
 
 ## Questions requiring the user's approval
-- OPS-001: вариант A (старый ключ в секреты) или B (новый ключ, однократная переустановка)?
 - ROM-Q1, ROM-Q2.
