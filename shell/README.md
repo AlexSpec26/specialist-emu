@@ -11,6 +11,8 @@
 
 Сборка: `cd shell/src && python3 ../tools/asm80.py main.asm -o ../build/shell.rom --base C000 --size 3000`
 
+Проверка: `tools/ShellSmoke.java` (запуск оболочки), `tools/ShellCompat.java` (сравнение игр с Монитором-2).
+
 Запуск: после включения «PROGRAM ?» — F1, затем ВК.
 
 Инструменты: `tools/asm80.py` — ассемблер 8080, `tools/dis80.py` — дизассемблер,

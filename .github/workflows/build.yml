@@ -3,7 +3,8 @@ name: Build APK
 on:
   push:
     branches: [ main ]
-    paths-ignore: [ 'zx/**', 'flipper/**', '.github/workflows/zx.yml', '.github/workflows/flipper.yml', 'tools/Z*.java', 'tools/flipper_core_test.c' ]
+    # SPEC only: other products have their own workflows (ADR-013)
+    paths: [ 'app/**', 'build.gradle', 'settings.gradle', 'gradle.properties', 'tools/CpuTest.java', 'tools/MachineTest.java', '.github/workflows/build.yml' ]
   workflow_dispatch:
 
 permissions:

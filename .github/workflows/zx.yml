@@ -3,7 +3,7 @@ name: Build ZX Spectrum APK
 on:
   push:
     branches: [ main ]
-    paths: [ 'zx/**', 'tools/ZexTest.java', '.github/workflows/zx.yml' ]
+    paths: [ 'zx/**', 'build.gradle', 'settings.gradle', 'gradle.properties', 'tools/ZexTest.java', 'tools/Z80FuseTest.java', 'tools/ZxShot.java', '.github/workflows/zx.yml' ]
   workflow_dispatch:
 
 permissions:

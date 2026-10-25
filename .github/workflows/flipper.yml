@@ -1,9 +1,7 @@
 name: Build Flipper app
 
 on:
-  push:
-    branches: [ main ]
-    paths: [ 'flipper/**', 'tools/flipper_core_test.c', '.github/workflows/flipper.yml' ]
+  # frozen (ADR-012): manual runs only
   workflow_dispatch:
 
 permissions:

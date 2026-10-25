@@ -51,7 +51,7 @@ APPVARS         EQU VARS+20h        ; 60h bytes for the programs
         ; Kept byte for byte: games call its routines and even read its bytes as data.
         ; After reset it shows "PROGRAM ?": ВК starts the shell (C800), F1-F11 + tape
         ; loads a program, as on the original machine.
-        INCBIN "../../flipper/assets/spec_m2.rom", 0, 800h
+        INCBIN "../base/spec_m2.rom", 0, 800h
         ASSERT $ == 0C800h
 
 ; ---------------------------------------------------------------- monitor entry points
