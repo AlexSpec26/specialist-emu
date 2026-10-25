@@ -59,9 +59,9 @@ public class ShellTiming {
         long ov = call("REDRAW");
         report("REDRAW Обзор", ov);
         save(out, "overview");
-        m.write(sym.get("CURAPP"), 5);
+        m.write(sym.get("CURAPP"), 3);
         long st = call("REDRAW");
-        report("REDRAW заглушка", st);
+        report("REDRAW программа 3", st);
         save(out, "stub");
         if (sym.containsKey("MEM_DRAW")) {
             m.write(sym.get("CURAPP"), 1);

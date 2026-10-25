@@ -2,7 +2,7 @@
 ;  Shell: start-up, screen frame (menu line, status line), program switching
 ; =====================================================================================
 
-NAPPS   EQU 6
+NAPPS   EQU 5
 
 SHELL_INIT:
         LXI SP,STACK_TOP
@@ -17,12 +17,27 @@ SHELL_INIT:
         SHLD V_MEMTOP
         XRA A
         STA INV
-        STA RUS
-        STA CURAPP
         MVI A,0FFh
         STA LASTK
+        ; warm start (C800 again: a game's exit, a tape read stopped by a key, F5 program's
+        ; RET): keep the running programs and their state if the variables look intact
+        LHLD SIG
+        MOV A,H
+        CPI 0A5h
+        JNZ .cold
+        MOV A,L
+        CPI 5Ah
+        JNZ .cold
+        LDA CURAPP
+        CPI NAPPS
+        JC MAIN
+.cold:  XRA A
+        STA RUS
+        STA CURAPP
         MVI A,1
         STA RUNMASK
+        LXI H,0A55Ah
+        SHLD SIG
         CALL APPS_INIT
 
 MAIN:   LXI SP,STACK_TOP

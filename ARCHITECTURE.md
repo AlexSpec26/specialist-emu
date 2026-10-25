@@ -19,7 +19,7 @@ shell/      ROM: оболочка в ПЗУ «Специалиста»
   build/    shell.rom (собирается)
 flipper/    FLIP (заморожен): spec_core.c, specialist_app.c, assets
 tools/      настольные тесты (Java): CpuTest, MachineTest, ShellCompat, ShellSmoke, ShellTiming,
-            ShellMemTest, ShellDbgTest (SPEC/ROM);
+            ShellMemTest, ShellTapeTest, ShellDbgTest (отложен) (SPEC/ROM);
             Z80FuseTest, ZexTest, ZxShot (ZX); flipper_core_test.c (FLIP)
 .github/workflows/  build.yml (SPEC), zx.yml (ZX), rom.yml (ROM), flipper.yml (FLIP, вручную)
 ```

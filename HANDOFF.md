@@ -4,7 +4,7 @@
 - Branch: main (короткие ветки на задачу пока не заводились — см. OPS-002)
 - Last pushed commit: см. `git log -1` (коммит «ROM-001 ...»)
 - Open PR: нет
-- Active backlog IDs: ROM-Q4 (ждёт владельца), ROM-006
+- Active backlog IDs: ROM-012, затем ROM-007 «Монитор»
 - User-approved goal for this session: ядро и совместимость (сделано), память проекта (сделано),
   ключ подписи в секретах (OPS-001, сделано), «давай» → ROM-001, ROM-002 (сделаны)
 
@@ -18,6 +18,8 @@
   ...), SCROLLUP/DN с шириной в E; «Обзор» вынесен в overview.asm перед CD21.
 
 - ROM-003: «Отладка» (apps.asm, ADR-016), ShellDbgTest в CI.
+
+- «Отладка» отложена (debugger.asm не подключён); ROM-006 «Магнитофон», тёплый старт C800.
 
 ## Verified results
 - ShellMemTest — MEMORY OK; ShellTiming — «Память» 0,72 с, ↓ с прокруткой 175 мс.
@@ -35,10 +37,10 @@
 - Принятые: ADR-002…015.
 
 ## Exact next steps (ordered)
-1. Ответ владельца по ROM-Q4 (места ~1,4 КБ после ужатия).
-2. ROM-006 «Магнитофон» (обязателен), затем то, что решит владелец.
+1. ROM-012: правка в «Памяти» (hex/текст, вставка/удаление).
+2. ROM-007 «Монитор».
 3. Перед каждым коммитом ROM: собрать, `ShellSmoke`, `ShellTiming`, по возможности
    `ShellCompat` (игры — см. ARCHITECTURE «Внешние тестовые ресурсы»).
 
 ## Questions requiring the user's approval
-- ROM-Q1, ROM-Q2, ROM-Q4.
+- ROM-Q1, ROM-Q2.

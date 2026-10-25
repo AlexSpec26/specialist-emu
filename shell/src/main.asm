@@ -42,6 +42,7 @@ REPCNT          EQU VARS+5          ; 2 bytes: autorepeat countdown
 CURAPP          EQU VARS+7          ; current program
 RUNMASK         EQU VARS+8          ; bit n = program n is running
 SHIFTK          EQU VARS+9          ; НР held during the last key
+SIG             EQU VARS+0Ah        ; 2 bytes: A55A = shell variables are set (warm start)
 GBUF            EQU VARS+10h        ; 8 bytes: glyph being drawn
 TMP             EQU VARS+18h        ; scratch
 GP1             EQU VARS+20h        ; 2 bytes each: glyph addresses for GRP4
