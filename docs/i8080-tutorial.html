@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Процессор 8080: учебник</title>
+<style>
+:root{
+  --bg:#fbfaf7; --fg:#1d1d1b; --muted:#5f5d57; --line:#d9d5cc; --card:#ffffff;
+  --accent:#b4441f; --accent2:#1f5fa8; --green:#2e7d4f; --violet:#6b3fa0; --amber:#a86a00;
+  --code-bg:#f2efe8; --hl:#fff1c2;
+  --mov:#e3eefb; --alu:#e6f4ea; --jmp:#fde7e1; --stk:#efe6f8; --ctl:#f3f0e6;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#16171a; --fg:#e8e6e1; --muted:#a3a09a; --line:#34353a; --card:#1e1f23;
+    --accent:#ff8a5c; --accent2:#7fb2ff; --green:#6fd09a; --violet:#c49bff; --amber:#ffc35c;
+    --code-bg:#24262b; --hl:#3a3420;
+    --mov:#1d2a3d; --alu:#1c3326; --jmp:#3d231d; --stk:#2c2140; --ctl:#2b2a24;
+  }
+}
+:root[data-theme="dark"]{
+    --bg:#16171a; --fg:#e8e6e1; --muted:#a3a09a; --line:#34353a; --card:#1e1f23;
+    --accent:#ff8a5c; --accent2:#7fb2ff; --green:#6fd09a; --violet:#c49bff; --amber:#ffc35c;
+    --code-bg:#24262b; --hl:#3a3420;
+    --mov:#1d2a3d; --alu:#1c3326; --jmp:#3d231d; --stk:#2c2140; --ctl:#2b2a24;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.6 "PT Serif",Georgia,"Times New Roman",serif}
+main{max-width:860px;margin:0 auto;padding:24px 16px 80px}
+h1{font:700 2.1em/1.15 "PT Sans",system-ui,sans-serif;margin:.4em 0 .2em}
+h2{font:700 1.45em/1.25 "PT Sans",system-ui,sans-serif;margin:2.2em 0 .5em;padding-top:.6em;border-top:2px solid var(--line)}
+h3{font:700 1.12em/1.3 "PT Sans",system-ui,sans-serif;margin:1.6em 0 .4em}
+.lead{color:var(--muted);font-size:1.05em}
+code,pre,.mono{font-family:"JetBrains Mono","DejaVu Sans Mono",Consolas,monospace;font-size:.88em}
+code{background:var(--code-bg);padding:1px 5px;border-radius:4px}
+pre{background:var(--code-bg);padding:12px 14px;border-radius:8px;overflow-x:auto;line-height:1.45}
+pre .c{color:var(--muted)}
+pre .a{color:var(--accent2)}
+pre .b{color:var(--green)}
+table{border-collapse:collapse;width:100%;margin:.6em 0 1em;font-size:.92em}
+th,td{border:1px solid var(--line);padding:4px 7px;vertical-align:top;text-align:left}
+th{background:var(--code-bg);font-family:"PT Sans",system-ui,sans-serif}
+.wrap{overflow-x:auto}
+.note{border-left:4px solid var(--accent2);background:var(--card);padding:8px 14px;margin:1em 0;border-radius:0 8px 8px 0}
+.warn{border-left-color:var(--accent)}
+figure{margin:1.2em 0;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;overflow-x:auto}
+figure svg{min-width:580px}
+figcaption{color:var(--muted);font-size:.9em;margin-top:6px}
+svg{width:100%;height:auto;display:block}
+svg text{font-family:"PT Sans",system-ui,sans-serif;fill:var(--fg)}
+svg .mono{font-family:"JetBrains Mono","DejaVu Sans Mono",monospace}
+svg .box{fill:var(--card);stroke:var(--fg);stroke-width:1.5}
+svg .reg{fill:var(--mov);stroke:var(--fg);stroke-width:1.2}
+svg .acc{fill:var(--hl);stroke:var(--accent);stroke-width:2}
+svg .alu{fill:var(--alu);stroke:var(--fg);stroke-width:1.5}
+svg .ctl{fill:var(--ctl);stroke:var(--fg);stroke-width:1.2}
+svg .stk{fill:var(--stk);stroke:var(--fg);stroke-width:1.2}
+svg .bus{stroke:var(--accent2);stroke-width:5;fill:none}
+svg .bus2{stroke:var(--accent);stroke-width:5;fill:none}
+svg .ln{stroke:var(--muted);stroke-width:1.3;fill:none}
+svg .arrow{stroke:var(--fg);stroke-width:1.6;fill:none;marker-end:url(#ah)}
+svg .dim{fill:var(--muted)}
+.toc{columns:2;column-gap:28px;font-size:.95em}
+.toc a{color:var(--accent2);text-decoration:none}
+@media (max-width:620px){.toc{columns:1}body{font-size:16px}}
+.opmap{font-size:11px;table-layout:fixed;min-width:760px}
+.opmap td,.opmap th{padding:3px 2px;text-align:center;line-height:1.2;font-family:"JetBrains Mono","DejaVu Sans Mono",monospace}
+.opmap td span{color:var(--muted);font-size:.92em}
+.opmap .mov{background:var(--mov)} .opmap .alu{background:var(--alu)} .opmap .jmp{background:var(--jmp)}
+.opmap .stk{background:var(--stk)} .opmap .ctl{background:var(--ctl)} .opmap .und{opacity:.45;font-style:italic}
+.legend span{display:inline-block;padding:1px 8px;margin:2px 4px 2px 0;border-radius:4px;font-size:.85em;border:1px solid var(--line)}
+.ins td:first-child{font-family:"JetBrains Mono","DejaVu Sans Mono",monospace;white-space:nowrap}
+.ins td:nth-child(2),.ins td:nth-child(3),.ins td:nth-child(4){font-family:"JetBrains Mono","DejaVu Sans Mono",monospace;white-space:nowrap}
+.kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;font-family:"PT Sans",sans-serif;font-size:.9em}
+</style>
+</head>
+<body>
+<main>
+<h1>Процессор 8080 и его ассемблер</h1>
+<p class="lead">Учебник для «Специалиста»: как устроен КР580ВМ80А (советский аналог Intel 8080), что он делает с каждой командой и как писать для него программы. Со схемами, всеми командами, тактами и примерами.</p>
+
+<nav class="toc">
+<ol>
+<li><a href="#s1">Что такое процессор и программа</a></li>
+<li><a href="#s2">Устройство 8080</a></li>
+<li><a href="#s3">Регистры</a></li>
+<li><a href="#s4">Флаги</a></li>
+<li><a href="#s5">Память и числа в ней</a></li>
+<li><a href="#s6">Память «Специалиста»</a></li>
+<li><a href="#s7">Как выполняется команда</a></li>
+<li><a href="#s8">Способы адресации</a></li>
+<li><a href="#s9">Стек и подпрограммы</a></li>
+<li><a href="#s10">Как читать запись команды</a></li>
+<li><a href="#s11">Пересылки</a></li>
+<li><a href="#s12">Арифметика</a></li>
+<li><a href="#s13">Логика, сдвиги, сравнение</a></li>
+<li><a href="#s14">Переходы и вызовы</a></li>
+<li><a href="#s15">Стек, ввод-вывод, управление</a></li>
+<li><a href="#s16">Как устроены коды команд</a></li>
+<li><a href="#s17">Карта всех 256 кодов</a></li>
+<li><a href="#s18">Ассемблер: запись программы</a></li>
+<li><a href="#s19">Приёмы программирования</a></li>
+<li><a href="#s20">Примеры для «Специалиста»</a></li>
+<li><a href="#s21">Шпаргалка</a></li>
+</ol>
+</nav>
+
+<h2 id="s1">1. Что такое процессор и программа</h2>
+<p>Процессор умеет очень немного: взять число из памяти, положить число в память, сложить, вычесть, сравнить, сдвинуть биты и перейти к другому месту программы. Всё остальное — игры, текст на экране, загрузка с ленты — складывается из тысяч таких простых шагов.</p>
+<p><b>Программа</b> — это последовательность байтов в памяти. Каждый байт или группа из 2–3 байтов — одна <b>команда</b>. Процессор читает команды одну за другой и выполняет. Например, байты <code>3E 05</code> означают «положи число 5 в регистр A».</p>
+<p>Писать байтами неудобно, поэтому у каждой команды есть короткое имя — <b>мнемоника</b>: <code>MVI A,05</code>. <b>Ассемблер</b> — программа (или человек с таблицей), которая переводит мнемоники в байты. <b>Дизассемблер</b> делает обратное: показывает байты как мнемоники.</p>
+<div class="note">Все числа в этом учебнике, если не сказано иначе, — шестнадцатеричные (hex): цифры 0–9 и A–F, где A=10, …, F=15. Так удобнее: один байт — ровно две hex-цифры (00…FF = 0…255), адрес — ровно четыре (0000…FFFF = 0…65535). В исходных текстах ассемблера к hex-числу часто приписывают букву <code>H</code>: <code>0FFH</code>.</div>
+
+<h2 id="s2">2. Устройство 8080</h2>
+<p>8080 — восьмиразрядный процессор: он обрабатывает числа по 8 бит (байты). Адрес в памяти у него 16-разрядный, поэтому он видит 2<sup>16</sup> = 65536 байт (64 КБ). В «Специалисте» он работает на частоте 2 МГц: один <b>такт</b> длится 0,5 мкс, а простейшая команда занимает 4–5 тактов, то есть около 2–2,5 мкс. За секунду — примерно 400–500 тысяч простых команд.</p>
+
+<figure>
+<svg viewBox="0 0 820 440" role="img" aria-label="Схема процессора 8080">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--fg)"/></marker></defs>
+<rect x="6" y="6" width="600" height="420" rx="12" class="box" style="stroke-dasharray:6 4"/>
+<text x="20" y="30" style="font-weight:700">Процессор КР580ВМ80А (8080)</text>
+<rect x="40" y="70" width="230" height="250" rx="8" class="ctl"/>
+<text x="155" y="92" text-anchor="middle" style="font-weight:700">Регистры</text>
+<g class="mono">
+<rect x="55" y="104" width="95" height="32" class="reg"/><text x="102" y="125" text-anchor="middle">F флаги</text>
+<rect x="160" y="104" width="95" height="32" class="acc"/><text x="207" y="125" text-anchor="middle">A</text>
+<rect x="55" y="142" width="95" height="32" class="reg"/><text x="102" y="163" text-anchor="middle">B</text>
+<rect x="160" y="142" width="95" height="32" class="reg"/><text x="207" y="163" text-anchor="middle">C</text>
+<rect x="55" y="180" width="95" height="32" class="reg"/><text x="102" y="201" text-anchor="middle">D</text>
+<rect x="160" y="180" width="95" height="32" class="reg"/><text x="207" y="201" text-anchor="middle">E</text>
+<rect x="55" y="218" width="95" height="32" class="reg"/><text x="102" y="239" text-anchor="middle">H</text>
+<rect x="160" y="218" width="95" height="32" class="reg"/><text x="207" y="239" text-anchor="middle">L</text>
+<rect x="55" y="256" width="200" height="26" class="stk"/><text x="155" y="274" text-anchor="middle">SP  указатель стека</text>
+<rect x="55" y="286" width="200" height="26" class="stk"/><text x="155" y="304" text-anchor="middle">PC  счётчик команд</text>
+</g>
+<path d="M360,104 L540,104 L512,214 L388,214 Z" class="alu"/>
+<text x="450" y="140" text-anchor="middle" style="font-weight:700">АЛУ</text>
+<text x="450" y="162" text-anchor="middle" class="dim" style="font-size:12px">+  −  И  ИЛИ</text>
+<text x="450" y="180" text-anchor="middle" class="dim" style="font-size:12px">исключ. ИЛИ, сдвиги</text>
+<path d="M255,120 L366,120" class="arrow"/>
+<text x="300" y="113" class="dim" style="font-size:12px">A</text>
+<path d="M270,190 L378,190" class="arrow"/>
+<text x="282" y="183" class="dim" style="font-size:12px">второе число</text>
+<path d="M450,104 L450,52 L207,52 L207,100" class="arrow"/>
+<text x="330" y="46" text-anchor="middle" class="dim" style="font-size:12px">результат → A,  признаки → F</text>
+<rect x="340" y="246" width="240" height="66" rx="8" class="ctl"/>
+<text x="460" y="273" text-anchor="middle" style="font-weight:700">Дешифратор команд</text>
+<text x="460" y="294" text-anchor="middle" class="dim" style="font-size:12px">и устройство управления</text>
+<path d="M155,312 L155,350" class="ln"/>
+<path d="M460,312 L460,395" class="ln"/>
+<path d="M20,350 L800,350" class="bus"/>
+<path d="M20,395 L800,395" class="bus2"/>
+<text x="620" y="342" style="fill:var(--accent2);font-weight:700;font-size:14px">шина адреса, 16 бит</text>
+<text x="620" y="387" style="fill:var(--accent);font-weight:700;font-size:14px">шина данных, 8 бит</text>
+<rect x="640" y="70" width="160" height="240" rx="8" class="box"/>
+<text x="720" y="94" text-anchor="middle" style="font-weight:700">Память</text>
+<text x="720" y="114" text-anchor="middle" class="dim" style="font-size:12px">64 КБ: 0000–FFFF</text>
+<g class="mono" style="font-size:13px">
+<rect x="660" y="128" width="120" height="24" class="reg"/><text x="670" y="145">0100: 3E</text>
+<rect x="660" y="152" width="120" height="24" class="reg"/><text x="670" y="169">0101: 05</text>
+<rect x="660" y="176" width="120" height="24" class="reg"/><text x="670" y="193">0102: 47</text>
+<rect x="660" y="200" width="120" height="24" class="reg"/><text x="670" y="217">0103: C9</text>
+<text x="720" y="250" text-anchor="middle" class="dim">…</text>
+</g>
+<path d="M700,310 L700,350" class="ln"/>
+<path d="M740,310 L740,395" class="ln"/>
+</svg>
+<figcaption>Упрощённая схема: регистры, АЛУ (арифметико-логическое устройство), дешифратор команд. С памятью процессор связан двумя шинами: по шине адреса он говорит «какой байт», по шине данных этот байт идёт туда или обратно.</figcaption>
+</figure>
+
+<h2 id="s3">3. Регистры</h2>
+<p><b>Регистр</b> — ячейка памяти внутри самого процессора. Операции с регистрами быстрые, с памятью — медленнее, поэтому программа старается держать нужные числа в регистрах.</p>
+<table>
+<tr><th>Регистр</th><th>Размер</th><th>Назначение</th></tr>
+<tr><td><b>A</b> — аккумулятор</td><td>8 бит</td><td>Главный регистр. Все арифметические и логические операции берут одно число из A и кладут результат в A.</td></tr>
+<tr><td><b>B, C, D, E, H, L</b></td><td>8 бит каждый</td><td>Регистры общего назначения. Попарно образуют 16-разрядные пары: <b>BC</b>, <b>DE</b>, <b>HL</b>.</td></tr>
+<tr><td><b>HL</b></td><td>16 бит</td><td>Особая пара: служит указателем на память. Ячейка по адресу из HL называется <b>M</b> (memory) и используется в командах как ещё один «регистр».</td></tr>
+<tr><td><b>F</b> — флаги</td><td>8 бит</td><td>Признаки результата последней операции: ноль ли он, отрицательный ли, был ли перенос. По ним делаются условные переходы.</td></tr>
+<tr><td><b>SP</b></td><td>16 бит</td><td>Указатель стека — адрес вершины стека в памяти.</td></tr>
+<tr><td><b>PC</b></td><td>16 бит</td><td>Счётчик команд (СК) — адрес следующей команды.</td></tr>
+</table>
+
+<figure>
+<svg viewBox="0 0 640 170" role="img" aria-label="Регистровые пары">
+<g class="mono">
+<rect x="20" y="20" width="120" height="40" class="reg"/><text x="80" y="46" text-anchor="middle">B (старший)</text>
+<rect x="140" y="20" width="120" height="40" class="reg"/><text x="200" y="46" text-anchor="middle">C (младший)</text>
+<text x="280" y="46">= пара BC, 16 бит</text>
+<rect x="20" y="70" width="120" height="40" class="reg"/><text x="80" y="96" text-anchor="middle">D</text>
+<rect x="140" y="70" width="120" height="40" class="reg"/><text x="200" y="96" text-anchor="middle">E</text>
+<text x="280" y="96">= пара DE</text>
+<rect x="20" y="120" width="120" height="40" class="acc"/><text x="80" y="146" text-anchor="middle">H (high)</text>
+<rect x="140" y="120" width="120" height="40" class="acc"/><text x="200" y="146" text-anchor="middle">L (low)</text>
+<text x="280" y="146">= пара HL → M = память[HL]</text>
+</g>
+</svg>
+<figcaption>Пример: если B = 12 и C = 34, то пара BC = 1234. Первая буква пары — старший байт.</figcaption>
+</figure>
+
+<h2 id="s4">4. Флаги</h2>
+<p>После арифметических и логических команд процессор записывает в регистр F несколько признаков результата. Сами флаги ничего не делают — их проверяют команды условного перехода (<code>JZ</code>, <code>JC</code> и др.).</p>
+<figure>
+<svg viewBox="0 0 640 215" role="img" aria-label="Регистр флагов">
+<g class="mono" style="font-size:15px">
+<text x="20" y="22" class="dim" style="font-size:12px">бит:</text>
+<text x="72" y="22" text-anchor="middle" class="dim">7</text><text x="142" y="22" text-anchor="middle" class="dim">6</text><text x="212" y="22" text-anchor="middle" class="dim">5</text><text x="282" y="22" text-anchor="middle" class="dim">4</text><text x="352" y="22" text-anchor="middle" class="dim">3</text><text x="422" y="22" text-anchor="middle" class="dim">2</text><text x="492" y="22" text-anchor="middle" class="dim">1</text><text x="562" y="22" text-anchor="middle" class="dim">0</text>
+<rect x="37" y="30" width="70" height="44" class="acc"/><text x="72" y="58" text-anchor="middle">S</text>
+<rect x="107" y="30" width="70" height="44" class="acc"/><text x="142" y="58" text-anchor="middle">Z</text>
+<rect x="177" y="30" width="70" height="44" class="ctl"/><text x="212" y="58" text-anchor="middle" class="dim">0</text>
+<rect x="247" y="30" width="70" height="44" class="acc"/><text x="282" y="58" text-anchor="middle">AC</text>
+<rect x="317" y="30" width="70" height="44" class="ctl"/><text x="352" y="58" text-anchor="middle" class="dim">0</text>
+<rect x="387" y="30" width="70" height="44" class="acc"/><text x="422" y="58" text-anchor="middle">P</text>
+<rect x="457" y="30" width="70" height="44" class="ctl"/><text x="492" y="58" text-anchor="middle" class="dim">1</text>
+<rect x="527" y="30" width="70" height="44" class="acc"/><text x="562" y="58" text-anchor="middle">CY</text>
+</g>
+<g style="font-size:13px">
+<text x="72" y="96" text-anchor="middle">знак</text>
+<text x="142" y="96" text-anchor="middle">ноль</text>
+<text x="282" y="96" text-anchor="middle">полуперенос</text>
+<text x="422" y="96" text-anchor="middle">чётность</text>
+<text x="562" y="96" text-anchor="middle">перенос</text>
+<text x="20" y="130">S = 1, если старший бит результата 1 («минус» для чисел со знаком −128…127).</text>
+<text x="20" y="150">Z = 1, если результат 00.  P = 1, если число единиц в результате чётное.</text>
+<text x="20" y="170">CY = 1, если был перенос из старшего бита (при вычитании — заём).</text>
+<text x="20" y="190">AC — перенос из бита 3 в бит 4; нужен только команде DAA.</text>
+</g>
+</svg>
+<figcaption>Регистр F. Биты 5 и 3 всегда 0, бит 1 всегда 1. Вместе A и F сохраняются в стек командой <code>PUSH PSW</code>.</figcaption>
+</figure>
+<p>Пример. Пусть A = F0. Команда <code>ADI 20</code> (прибавить 20): F0 + 20 = 110, в байт помещается только 10, а единица «уходит» — это перенос, <b>CY = 1</b>. Результат 10 не ноль (<b>Z = 0</b>), старший бит 0 (<b>S = 0</b>), в 10 одна единица — нечётно (<b>P = 0</b>).</p>
+<p>Ещё пример. <code>SUI 05</code> при A = 05 даёт 00: <b>Z = 1</b>. А при A = 03 даёт FE и <b>CY = 1</b> — был заём, то есть A было меньше вычитаемого. Так и сравнивают числа.</p>
+
+<h2 id="s5">5. Память и числа в ней</h2>
+<p>Память — это 65536 пронумерованных байтов. Номер байта — <b>адрес</b>. Процессору всё равно, что лежит в байте: часть команды, буква, кусок картинки — это просто число 00…FF. Смысл ему придаёт программа.</p>
+<p>16-разрядные числа (адреса, счётчики) 8080 хранит в двух соседних байтах <b>младшим байтом вперёд</b> (по-английски little-endian):</p>
+<figure>
+<svg viewBox="0 0 640 120" role="img" aria-label="Порядок байтов">
+<g class="mono" style="font-size:15px">
+<text x="20" y="30">Число 1234 по адресу 2000:</text>
+<rect x="30" y="45" width="140" height="40" class="reg"/><text x="100" y="71" text-anchor="middle">2000: 34</text>
+<rect x="170" y="45" width="140" height="40" class="reg"/><text x="240" y="71" text-anchor="middle">2001: 12</text>
+<text x="330" y="60" style="font-size:13px">сначала младший (34),</text>
+<text x="330" y="80" style="font-size:13px">потом старший (12)</text>
+<text x="20" y="110" style="font-size:13px" class="dim">Поэтому JMP 1234 в памяти выглядит как C3 34 12.</text>
+</g>
+</svg>
+</figure>
+
+<h2 id="s6">6. Память «Специалиста»</h2>
+<figure>
+<svg viewBox="0 0 680 330" role="img" aria-label="Карта памяти Специалиста">
+<g style="font-size:13px">
+<rect x="40" y="20" width="160" height="160" class="alu"/><text x="120" y="96" text-anchor="middle" style="font-weight:700">ОЗУ</text><text x="120" y="116" text-anchor="middle">36 КБ</text>
+<rect x="40" y="180" width="160" height="53" class="acc"/><text x="120" y="211" text-anchor="middle" style="font-weight:700">Экран 12 КБ</text>
+<rect x="40" y="233" width="160" height="45" class="stk"/><text x="120" y="260" text-anchor="middle" style="font-weight:700">ПЗУ</text>
+<rect x="40" y="278" width="160" height="12" class="ctl"/>
+<rect x="40" y="290" width="160" height="20" class="reg"/><text x="120" y="304" text-anchor="middle" style="font-size:11px">ВВ55</text>
+<g class="mono" style="font-size:12px">
+<text x="34" y="25" text-anchor="end">0000</text><text x="34" y="184" text-anchor="end">9000</text><text x="34" y="237" text-anchor="end">C000</text><text x="34" y="282" text-anchor="end">F000</text><text x="34" y="296" text-anchor="end">F800</text><text x="34" y="314" text-anchor="end">FFFF</text>
+</g>
+<text x="220" y="40">0000–8FFF — оперативная память: программы и данные.</text>
+<text x="220" y="58" class="dim">Программы с ленты обычно грузятся с адреса 0000.</text>
+<text x="220" y="76" class="dim">Вверху ОЗУ (8F00–8FFF) — переменные монитора.</text>
+<text x="220" y="200">9000–BFFF — экран 384×256 точек: 1 бит = 1 точка.</text>
+<text x="220" y="218" class="dim">Запись в эту память сразу видна на экране.</text>
+<text x="220" y="256">C000–EFFF — ПЗУ: монитор (запуск, клавиатура, вывод,</text>
+<text x="220" y="274" class="dim">магнитофон) и шрифт. Записать туда нельзя.</text>
+<text x="220" y="300">F800–FFFF — микросхема ВВ55: клавиатура и магнитофон</text>
+<text x="220" y="318" class="dim">(4 регистра, повторяются по всей области).</text>
+</g>
+</svg>
+<figcaption>У «Специалиста» нет отдельных портов ввода-вывода: клавиатура и магнитофон видны как ячейки памяти. Поэтому команды <code>IN</code>/<code>OUT</code> на нём не нужны.</figcaption>
+</figure>
+<h3>Как устроен экран</h3>
+<p>Экран «Специалиста» хранится <b>по столбцам</b>: каждый байт — это 8 точек по горизонтали, а соседние байты в памяти — соседние строки по вертикали. Столбец шириной 8 точек занимает 256 байт.</p>
+<figure>
+<svg viewBox="0 0 640 250" role="img" aria-label="Устройство экранной памяти">
+<g class="mono" style="font-size:11px">
+<text x="78" y="16" text-anchor="middle" style="font-size:12px">столбец 0</text><text x="174" y="16" text-anchor="middle" style="font-size:12px">столбец 1</text><text x="270" y="16" text-anchor="middle" style="font-size:12px">столбец 2</text>
+<rect x="30" y="24" width="96" height="160" class="acc"/><rect x="126" y="24" width="96" height="160" class="reg"/><rect x="222" y="24" width="96" height="160" class="acc"/>
+<rect x="30" y="24" width="96" height="16" style="fill:var(--accent);opacity:.35"/><text x="78" y="36" text-anchor="middle">9000</text>
+<rect x="30" y="40" width="96" height="16" style="fill:var(--accent);opacity:.18"/><text x="78" y="52" text-anchor="middle">9001</text>
+<text x="78" y="110" text-anchor="middle" class="dim">…</text>
+<rect x="30" y="168" width="96" height="16" style="fill:var(--accent);opacity:.18"/><text x="78" y="180" text-anchor="middle">90FF</text>
+<text x="174" y="36" text-anchor="middle">9100</text><text x="174" y="52" text-anchor="middle">9101</text><text x="174" y="180" text-anchor="middle">91FF</text>
+<text x="270" y="36" text-anchor="middle">9200</text><text x="270" y="52" text-anchor="middle">9201</text><text x="270" y="180" text-anchor="middle">92FF</text>
+<text x="335" y="110" style="font-size:20px">…</text>
+<g style="font-size:12px">
+<text x="370" y="36">строка 0 (верх экрана)</text>
+<text x="370" y="52">строка 1</text>
+<text x="370" y="180">строка 255 (низ)</text>
+<text x="370" y="100" class="dim">в каждом байте 8 точек</text>
+<text x="370" y="116" class="dim">по горизонтали</text>
+</g>
+<text x="30" y="212" style="font-size:12px">1 столбец = 8 точек × 256 строк = 256 байт;  48 столбцов × 8 = 384 точки</text>
+<text x="30" y="232" style="font-size:12px">адрес = 9000 + столбец·100 + строка;  бит 7 — левая точка, бит 0 — правая</text>
+</g>
+</svg>
+</figure>
+
+<h2 id="s7">7. Как выполняется команда</h2>
+<p>Процессор всё время делает одно и то же:</p>
+<figure>
+<svg viewBox="0 0 680 160" role="img" aria-label="Цикл выполнения команды">
+<defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--fg)"/></marker></defs>
+<g style="font-size:13px">
+<rect x="10" y="40" width="150" height="70" rx="10" class="reg"/><text x="85" y="68" text-anchor="middle" style="font-weight:700">1. Выборка</text><text x="85" y="88" text-anchor="middle">байт по адресу PC</text>
+<rect x="190" y="40" width="150" height="70" rx="10" class="ctl"/><text x="265" y="68" text-anchor="middle" style="font-weight:700">2. PC + 1</text><text x="265" y="88" text-anchor="middle">и ещё 0–2 байта</text>
+<rect x="370" y="40" width="150" height="70" rx="10" class="alu"/><text x="445" y="68" text-anchor="middle" style="font-weight:700">3. Выполнение</text><text x="445" y="88" text-anchor="middle">по коду команды</text>
+<rect x="550" y="40" width="120" height="70" rx="10" class="acc"/><text x="610" y="68" text-anchor="middle" style="font-weight:700">4. Снова</text><text x="610" y="88" text-anchor="middle">с нового PC</text>
+<path d="M160,75 L188,75" style="stroke:var(--fg);stroke-width:1.6;marker-end:url(#ah2)"/>
+<path d="M340,75 L368,75" style="stroke:var(--fg);stroke-width:1.6;marker-end:url(#ah2)"/>
+<path d="M520,75 L548,75" style="stroke:var(--fg);stroke-width:1.6;marker-end:url(#ah2)"/>
+<path d="M610,110 C610,150 85,150 85,112" style="stroke:var(--fg);stroke-width:1.6;fill:none;marker-end:url(#ah2)"/>
+<text x="340" y="30" text-anchor="middle" class="dim">Переход (JMP, CALL, RET) просто записывает в PC новый адрес</text>
+</g>
+</svg>
+</figure>
+<p>Сам PC на экран не выводится — вы видите его только в отладчике. Важно понимать: процессор не знает, где код, а где данные. Если PC попадёт на таблицу или текст, он будет «выполнять» их как команды, и программа сломается.</p>
+
+<h2 id="s8">8. Способы адресации</h2>
+<p>То есть «откуда команда берёт число».</p>
+<table>
+<tr><th>Способ</th><th>Пример</th><th>Откуда число</th></tr>
+<tr><td>Регистровая</td><td><code>MOV A,B</code></td><td>из регистра B</td></tr>
+<tr><td>Непосредственная</td><td><code>MVI A,05</code></td><td>из самой команды (байт после кода)</td></tr>
+<tr><td>Прямая</td><td><code>LDA 9000</code></td><td>из памяти по адресу, записанному в команде</td></tr>
+<tr><td>Косвенная через HL</td><td><code>MOV A,M</code></td><td>из памяти по адресу в паре HL</td></tr>
+<tr><td>Косвенная через BC/DE</td><td><code>LDAX D</code></td><td>из памяти по адресу в DE (только в A и из A)</td></tr>
+<tr><td>Стековая</td><td><code>POP B</code></td><td>из памяти по адресу SP</td></tr>
+</table>
+<p>Косвенная адресация — основа всех циклов по памяти: положил адрес в HL, обработал ячейку <code>M</code>, сделал <code>INX H</code> — и уже смотришь на следующую.</p>
+
+<h2 id="s9">9. Стек и подпрограммы</h2>
+<p><b>Стек</b> — участок памяти, работающий как стопка тарелок: что положили последним, то и берут первым. Регистр SP указывает на вершину. Стек растёт <b>вниз</b>: при записи SP уменьшается.</p>
+<figure>
+<svg viewBox="0 0 700 250" role="img" aria-label="Работа стека">
+<g class="mono" style="font-size:12px">
+<text x="20" y="20" style="font-size:13px;font-weight:700">PUSH B (B=12, C=34), SP было 8000</text>
+<rect x="40" y="40" width="120" height="30" class="reg"/><text x="100" y="60" text-anchor="middle">7FFC: ??</text>
+<rect x="40" y="70" width="120" height="30" class="acc"/><text x="100" y="90" text-anchor="middle">7FFE: 34</text>
+<rect x="40" y="100" width="120" height="30" class="acc"/><text x="100" y="120" text-anchor="middle">7FFF: 12</text>
+<rect x="40" y="130" width="120" height="30" class="reg"/><text x="100" y="150" text-anchor="middle">8000: …</text>
+<text x="170" y="90">← SP = 7FFE после</text>
+<text x="170" y="150" class="dim">← SP = 8000 до</text>
+<text x="360" y="20" style="font-size:13px;font-weight:700">CALL 0200 по адресу 0105</text>
+<rect x="380" y="70" width="120" height="30" class="stk"/><text x="440" y="90" text-anchor="middle">7FFC: 08</text>
+<rect x="380" y="100" width="120" height="30" class="stk"/><text x="440" y="120" text-anchor="middle">7FFD: 01</text>
+<text x="510" y="90">← SP = 7FFC</text>
+<text x="360" y="160" style="font-size:12px">в стек — адрес возврата 0108</text>
+<text x="360" y="178" style="font-size:12px">(команда после CALL), PC = 0200</text>
+<text x="360" y="200" style="font-size:12px">RET: снимает 0108 со стека в PC,</text>
+<text x="360" y="218" style="font-size:12px">SP снова 7FFE — программа идёт дальше</text>
+</g>
+</svg>
+</figure>
+<p>Подпрограмма — кусок кода, который можно вызвать из разных мест командой <code>CALL адрес</code> и вернуться командой <code>RET</code>. Так устроены, например, подпрограммы монитора «напечатать символ», «ждать клавишу».</p>
+<div class="note warn">Главное правило стека: сколько раз положили (<code>PUSH</code>), столько и сняли (<code>POP</code>) — до <code>RET</code>. Иначе <code>RET</code> снимет не адрес возврата, а ваши данные, и программа «улетит».</div>
+
+<h2 id="s10">10. Как читать запись команды</h2>
+<p>Дальше в таблицах используются обозначения:</p>
+<table>
+<tr><th>Знак</th><th>Значит</th></tr>
+<tr><td><code>r</code>, <code>r1</code>, <code>r2</code></td><td>8-разрядный регистр: B, C, D, E, H, L, M или A (M — ячейка памяти по адресу HL)</td></tr>
+<tr><td><code>rp</code></td><td>регистровая пара: B (=BC), D (=DE), H (=HL), SP. В <code>PUSH</code>/<code>POP</code> вместо SP — PSW (= A и флаги)</td></tr>
+<tr><td><code>d8</code></td><td>число 00…FF прямо в команде</td></tr>
+<tr><td><code>d16</code>, <code>a16</code></td><td>число или адрес 0000…FFFF прямо в команде (2 байта, младший первым)</td></tr>
+<tr><td>Такты</td><td>сколько тактов идёт команда; в «Специалисте» 1 такт = 0,5 мкс. Через «/» — если условие выполнено / не выполнено.</td></tr>
+<tr><td>Флаги</td><td>какие флаги меняет: S Z AC P CY; «все» — все пять; «—» — никакие</td></tr>
+</table>
+<h2 id="s11">11. Пересылки</h2>
+<p>Копируют число из одного места в другое. Флаги не меняют.</p>
+<div class="wrap"><table class="ins">
+<tr><th>Команда</th><th>Байт</th><th>Такты</th><th>Флаги</th><th>Что делает</th></tr>
+<tr><td>MOV r1,r2</td><td>1</td><td>5 (7 с M)</td><td>—</td><td>r1 ← r2. <code>MOV A,B</code>: копия B в A. <code>MOV M,A</code>: A в память по адресу HL. <code>MOV M,M</code> не бывает — на её месте HLT.</td></tr>
+<tr><td>MVI r,d8</td><td>2</td><td>7 (10 с M)</td><td>—</td><td>r ← число. <code>MVI C,10</code></td></tr>
+<tr><td>LXI rp,d16</td><td>3</td><td>10</td><td>—</td><td>пара ← 16-разрядное число. <code>LXI H,9000</code> — HL указывает на начало экрана. <code>LXI SP,8000</code> — поставить стек.</td></tr>
+<tr><td>LDA a16</td><td>3</td><td>13</td><td>—</td><td>A ← память[a16]</td></tr>
+<tr><td>STA a16</td><td>3</td><td>13</td><td>—</td><td>память[a16] ← A</td></tr>
+<tr><td>LHLD a16</td><td>3</td><td>16</td><td>—</td><td>L ← память[a16], H ← память[a16+1]</td></tr>
+<tr><td>SHLD a16</td><td>3</td><td>16</td><td>—</td><td>память[a16] ← L, память[a16+1] ← H</td></tr>
+<tr><td>LDAX B / LDAX D</td><td>1</td><td>7</td><td>—</td><td>A ← память[BC] или память[DE]</td></tr>
+<tr><td>STAX B / STAX D</td><td>1</td><td>7</td><td>—</td><td>память[BC] или память[DE] ← A</td></tr>
+<tr><td>XCHG</td><td>1</td><td>4</td><td>—</td><td>обменять HL и DE. Быстрый способ «второго указателя».</td></tr>
+</table></div>
+<p>Обратите внимание: нет команды «записать число сразу в память по адресу» (как <code>MVI 9000,05</code>). Делают так: <code>MVI A,05</code>, <code>STA 9000</code>, или через HL: <code>LXI H,9000</code>, <code>MVI M,05</code>.</p>
+
+<h2 id="s12">12. Арифметика</h2>
+<p>Все операции над байтами идут через A: A ← A (операция) второе число.</p>
+<div class="wrap"><table class="ins">
+<tr><th>Команда</th><th>Байт</th><th>Такты</th><th>Флаги</th><th>Что делает</th></tr>
+<tr><td>ADD r</td><td>1</td><td>4 (7 с M)</td><td>все</td><td>A ← A + r</td></tr>
+<tr><td>ADI d8</td><td>2</td><td>7</td><td>все</td><td>A ← A + число</td></tr>
+<tr><td>ADC r / ACI d8</td><td>1 / 2</td><td>4 (7) / 7</td><td>все</td><td>A ← A + r + CY — сложение «с переносом», для чисел длиннее байта</td></tr>
+<tr><td>SUB r / SUI d8</td><td>1 / 2</td><td>4 (7) / 7</td><td>все</td><td>A ← A − r. CY = 1, если был заём (A было меньше)</td></tr>
+<tr><td>SBB r / SBI d8</td><td>1 / 2</td><td>4 (7) / 7</td><td>все</td><td>A ← A − r − CY</td></tr>
+<tr><td>INR r</td><td>1</td><td>5 (10 с M)</td><td>все, кроме CY</td><td>r ← r + 1</td></tr>
+<tr><td>DCR r</td><td>1</td><td>5 (10 с M)</td><td>все, кроме CY</td><td>r ← r − 1. Чаще всего — счётчик цикла: <code>DCR B</code> / <code>JNZ цикл</code></td></tr>
+<tr><td>INX rp</td><td>1</td><td>5</td><td>—</td><td>пара + 1. <b>Флаги не меняет</b>, даже Z!</td></tr>
+<tr><td>DCX rp</td><td>1</td><td>5</td><td>—</td><td>пара − 1. Тоже без флагов.</td></tr>
+<tr><td>DAD rp</td><td>1</td><td>10</td><td>только CY</td><td>HL ← HL + пара. Единственное 16-разрядное сложение. <code>DAD H</code> — умножить HL на 2.</td></tr>
+<tr><td>DAA</td><td>1</td><td>4</td><td>все</td><td>поправить A после сложения двоично-десятичных чисел (BCD), например счёта очков</td></tr>
+</table></div>
+<div class="note warn">Частая ошибка: <code>DCX B</code> / <code>JNZ цикл</code> не работает — DCX не ставит флаг Z. Для 16-разрядного счётчика проверяют пару вручную: <code>DCX B</code>, <code>MOV A,B</code>, <code>ORA C</code>, <code>JNZ цикл</code>.</div>
+
+<h2 id="s13">13. Логика, сдвиги, сравнение</h2>
+<div class="wrap"><table class="ins">
+<tr><th>Команда</th><th>Байт</th><th>Такты</th><th>Флаги</th><th>Что делает</th></tr>
+<tr><td>ANA r / ANI d8</td><td>1 / 2</td><td>4 (7) / 7</td><td>все, CY=0</td><td>A ← A И r: бит 1 только там, где 1 у обоих. <code>ANI 0F</code> оставляет младшие 4 бита («маска»).</td></tr>
+<tr><td>ORA r / ORI d8</td><td>1 / 2</td><td>4 (7) / 7</td><td>все, CY=0, AC=0</td><td>A ← A ИЛИ r: включить биты. <code>ORA A</code> — ничего не меняет в A, но ставит флаги и сбрасывает CY.</td></tr>
+<tr><td>XRA r / XRI d8</td><td>1 / 2</td><td>4 (7) / 7</td><td>все, CY=0, AC=0</td><td>A ← A исключающее ИЛИ r: переключить биты. <code>XRA A</code> — быстрый способ сделать A = 0.</td></tr>
+<tr><td>CMP r / CPI d8</td><td>1 / 2</td><td>4 (7) / 7</td><td>все</td><td>сравнить: вычислить A − r, <b>A не меняется</b>. Z=1 — равны; CY=1 — A меньше.</td></tr>
+<tr><td>CMA</td><td>1</td><td>4</td><td>—</td><td>A ← НЕ A (все биты наоборот)</td></tr>
+<tr><td>STC / CMC</td><td>1</td><td>4</td><td>CY</td><td>CY ← 1 / CY ← НЕ CY</td></tr>
+<tr><td>RLC</td><td>1</td><td>4</td><td>CY</td><td>сдвиг A влево по кругу: бит 7 идёт в бит 0 и в CY</td></tr>
+<tr><td>RRC</td><td>1</td><td>4</td><td>CY</td><td>сдвиг A вправо по кругу: бит 0 идёт в бит 7 и в CY</td></tr>
+<tr><td>RAL</td><td>1</td><td>4</td><td>CY</td><td>влево через перенос: CY → бит 0, бит 7 → CY</td></tr>
+<tr><td>RAR</td><td>1</td><td>4</td><td>CY</td><td>вправо через перенос: CY → бит 7, бит 0 → CY</td></tr>
+</table></div>
+<figure>
+<svg viewBox="0 0 680 200" role="img" aria-label="Сдвиги">
+<defs><marker id="ah3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--accent)"/></marker></defs>
+<g class="mono" style="font-size:12px">
+<text x="10" y="28" style="font-weight:700">RLC</text>
+<rect x="80" y="10" width="40" height="28" class="acc"/><text x="100" y="29" text-anchor="middle">CY</text>
+<rect x="160" y="10" width="240" height="28" class="reg"/><text x="280" y="29" text-anchor="middle">7 6 5 4 3 2 1 0</text>
+<path d="M160,24 L124,24" style="stroke:var(--accent);stroke-width:2;marker-end:url(#ah3)"/>
+<path d="M170,40 C170,62 410,62 410,24 L402,24" style="stroke:var(--accent);stroke-width:2;fill:none;marker-end:url(#ah3)"/>
+<text x="430" y="29" class="dim">бит 7 → CY и в бит 0</text>
+<text x="10" y="108" style="font-weight:700">RAL</text>
+<rect x="80" y="90" width="40" height="28" class="acc"/><text x="100" y="109" text-anchor="middle">CY</text>
+<rect x="160" y="90" width="240" height="28" class="reg"/><text x="280" y="109" text-anchor="middle">7 6 5 4 3 2 1 0</text>
+<path d="M160,104 L124,104" style="stroke:var(--accent);stroke-width:2;marker-end:url(#ah3)"/>
+<path d="M100,120 C100,145 410,145 410,104 L402,104" style="stroke:var(--accent);stroke-width:2;fill:none;marker-end:url(#ah3)"/>
+<text x="430" y="109" class="dim">CY в бит 0, бит 7 в CY</text>
+<text x="10" y="185" class="dim" style="font-size:12px">RRC и RAR — то же самое в другую сторону. Сдвиг влево = умножение на 2, вправо = деление на 2.</text>
+</g>
+</svg>
+</figure>
+<h3>Как сравнивать числа</h3>
+<table>
+<tr><th>Хотим перейти, если</th><th>После <code>CMP r</code> (A с r) — без знака</th></tr>
+<tr><td>A = r</td><td><code>JZ</code></td></tr>
+<tr><td>A ≠ r</td><td><code>JNZ</code></td></tr>
+<tr><td>A &lt; r</td><td><code>JC</code></td></tr>
+<tr><td>A ≥ r</td><td><code>JNC</code></td></tr>
+<tr><td>A &gt; r</td><td><code>JZ</code> мимо, потом <code>JNC</code> (или сравнить наоборот)</td></tr>
+<tr><td>A ≤ r</td><td><code>JC</code> или <code>JZ</code></td></tr>
+</table>
+<p>Для чисел со знаком (−128…127) смотрят флаг S (<code>JM</code> — «минус», <code>JP</code> — «плюс»), но с осторожностью: при переполнении знак может «перевернуться».</p>
+
+<h2 id="s14">14. Переходы и вызовы</h2>
+<p>Условия в именах команд:</p>
+<table>
+<tr><th>Условие</th><th>Флаг</th><th>Перевод</th></tr>
+<tr><td>NZ / Z</td><td>Z = 0 / Z = 1</td><td>не ноль / ноль (не равно / равно)</td></tr>
+<tr><td>NC / C</td><td>CY = 0 / CY = 1</td><td>нет переноса / перенос (≥ / &lt;)</td></tr>
+<tr><td>PO / PE</td><td>P = 0 / P = 1</td><td>нечётно / чётно (parity odd / even)</td></tr>
+<tr><td>P / M</td><td>S = 0 / S = 1</td><td>плюс / минус</td></tr>
+</table>
+<div class="wrap"><table class="ins">
+<tr><th>Команда</th><th>Байт</th><th>Такты</th><th>Флаги</th><th>Что делает</th></tr>
+<tr><td>JMP a16</td><td>3</td><td>10</td><td>—</td><td>перейти: PC ← a16</td></tr>
+<tr><td>Jусл a16</td><td>3</td><td>10</td><td>—</td><td>перейти, если условие: <code>JZ</code>, <code>JNZ</code>, <code>JC</code>, <code>JNC</code>, <code>JPE</code>, <code>JPO</code>, <code>JP</code>, <code>JM</code></td></tr>
+<tr><td>CALL a16</td><td>3</td><td>17</td><td>—</td><td>вызвать подпрограмму: адрес следующей команды — в стек, PC ← a16</td></tr>
+<tr><td>Cусл a16</td><td>3</td><td>17 / 11</td><td>—</td><td>вызвать, если условие: <code>CZ</code>, <code>CNZ</code>, <code>CC</code>, <code>CNC</code>, <code>CPE</code>, <code>CPO</code>, <code>CP</code>, <code>CM</code></td></tr>
+<tr><td>RET</td><td>1</td><td>10</td><td>—</td><td>вернуться: PC ← из стека</td></tr>
+<tr><td>Rусл</td><td>1</td><td>11 / 5</td><td>—</td><td>вернуться, если условие: <code>RZ</code>, <code>RNZ</code>, <code>RC</code>, <code>RNC</code>, …</td></tr>
+<tr><td>PCHL</td><td>1</td><td>5</td><td>—</td><td>перейти по адресу в HL: PC ← HL. Для таблиц переходов.</td></tr>
+<tr><td>RST n</td><td>1</td><td>11</td><td>—</td><td>короткий CALL на адрес n·8 (0000, 0008, …, 0038)</td></tr>
+</table></div>
+
+<h2 id="s15">15. Стек, ввод-вывод, управление</h2>
+<div class="wrap"><table class="ins">
+<tr><th>Команда</th><th>Байт</th><th>Такты</th><th>Флаги</th><th>Что делает</th></tr>
+<tr><td>PUSH rp</td><td>1</td><td>11</td><td>—</td><td>положить пару в стек: <code>PUSH B</code>, <code>PUSH D</code>, <code>PUSH H</code>, <code>PUSH PSW</code> (A и флаги)</td></tr>
+<tr><td>POP rp</td><td>1</td><td>10</td><td>— (POP PSW — все)</td><td>снять пару со стека</td></tr>
+<tr><td>XTHL</td><td>1</td><td>18</td><td>—</td><td>обменять HL и слово на вершине стека</td></tr>
+<tr><td>SPHL</td><td>1</td><td>5</td><td>—</td><td>SP ← HL</td></tr>
+<tr><td>IN d8 / OUT d8</td><td>2</td><td>10</td><td>—</td><td>ввод/вывод через порт. В «Специалисте» не используются: устройства там — ячейки памяти.</td></tr>
+<tr><td>EI / DI</td><td>1</td><td>4</td><td>—</td><td>разрешить/запретить прерывания (в «Специалисте» прерываний нет)</td></tr>
+<tr><td>HLT</td><td>1</td><td>7</td><td>—</td><td>остановить процессор до прерывания. Без прерываний — до сброса.</td></tr>
+<tr><td>NOP</td><td>1</td><td>4</td><td>—</td><td>ничего не делать. Для задержек и чтобы «забить» лишние байты.</td></tr>
+</table></div>
+
+<h2 id="s16">16. Как устроены коды команд</h2>
+<p>Код команды 8080 не случайный: биты кода означают регистры и операции. Если разобраться, многие коды можно «вычислить в уме».</p>
+<figure>
+<svg viewBox="0 0 680 260" role="img" aria-label="Формат кода команды">
+<g class="mono" style="font-size:14px">
+<text x="20" y="24" style="font-weight:700">MOV r1,r2</text>
+<rect x="160" y="8" width="60" height="26" class="ctl"/><text x="190" y="26" text-anchor="middle">0 1</text>
+<rect x="220" y="8" width="90" height="26" class="acc"/><text x="265" y="26" text-anchor="middle">r1</text>
+<rect x="310" y="8" width="90" height="26" class="reg"/><text x="355" y="26" text-anchor="middle">r2</text>
+<text x="420" y="26" style="font-size:12px">коды 40–7F</text>
+<text x="20" y="70" style="font-weight:700">ADD..CMP r</text>
+<rect x="160" y="54" width="60" height="26" class="ctl"/><text x="190" y="72" text-anchor="middle">1 0</text>
+<rect x="220" y="54" width="90" height="26" class="alu"/><text x="265" y="72" text-anchor="middle">операция</text>
+<rect x="310" y="54" width="90" height="26" class="reg"/><text x="355" y="72" text-anchor="middle">r</text>
+<text x="420" y="72" style="font-size:12px">коды 80–BF</text>
+<text x="20" y="116" style="font-weight:700">MVI r,d8</text>
+<rect x="160" y="100" width="60" height="26" class="ctl"/><text x="190" y="118" text-anchor="middle">0 0</text>
+<rect x="220" y="100" width="90" height="26" class="acc"/><text x="265" y="118" text-anchor="middle">r</text>
+<rect x="310" y="100" width="90" height="26" class="ctl"/><text x="355" y="118" text-anchor="middle">1 1 0</text>
+<text x="420" y="118" style="font-size:12px">+ байт числа</text>
+<text x="20" y="162" style="font-weight:700">LXI rp,d16</text>
+<rect x="160" y="146" width="60" height="26" class="ctl"/><text x="190" y="164" text-anchor="middle">0 0</text>
+<rect x="220" y="146" width="60" height="26" class="stk"/><text x="250" y="164" text-anchor="middle">rp</text>
+<rect x="280" y="146" width="120" height="26" class="ctl"/><text x="340" y="164" text-anchor="middle">0 0 0 1</text>
+<text x="420" y="164" style="font-size:12px">+ 2 байта числа</text>
+<text x="20" y="204" style="font-size:12px">r:  000 B   001 C   010 D   011 E   100 H   101 L   110 M   111 A</text>
+<text x="20" y="224" style="font-size:12px">rp: 00 BC   01 DE   10 HL   11 SP (в PUSH/POP — PSW)</text>
+<text x="20" y="244" style="font-size:12px">операция: 000 ADD 001 ADC 010 SUB 011 SBB 100 ANA 101 XRA 110 ORA 111 CMP</text>
+</g>
+</svg>
+</figure>
+<p>Пример: <code>MOV A,B</code> = 01 111 000 = 78. <code>ADD M</code> = 10 000 110 = 86. <code>MVI C,…</code> = 00 001 110 = 0E.</p>
+
+<h2 id="s17">17. Карта всех 256 кодов</h2>
+<p>Строка — старшая hex-цифра кода, столбец — младшая. Например, код <code>3E</code> — строка 3x, столбец xE: <code>MVI A,d8</code>.</p>
+<p class="legend"><span style="background:var(--mov)">пересылки</span><span style="background:var(--alu)">арифметика и логика</span><span style="background:var(--jmp)">переходы</span><span style="background:var(--stk)">стек</span><span style="background:var(--ctl)">управление</span><span style="opacity:.5;font-style:italic">недокументированные</span></p>
+<div class="wrap"><table class="opmap"><tr><th></th><th>x0</th><th>x1</th><th>x2</th><th>x3</th><th>x4</th><th>x5</th><th>x6</th><th>x7</th><th>x8</th><th>x9</th><th>xA</th><th>xB</th><th>xC</th><th>xD</th><th>xE</th><th>xF</th></tr>
+<tr><th>0x</th><td class="ctl" title="00: NOP (1 байт)">NOP</td><td class="mov" title="01: LXI B,d16 (3 байт)">LXI<br><span>B,d16</span></td><td class="mov" title="02: STAX B (1 байт)">STAX<br><span>B</span></td><td class="alu" title="03: INX B (1 байт)">INX<br><span>B</span></td><td class="alu" title="04: INR B (1 байт)">INR<br><span>B</span></td><td class="alu" title="05: DCR B (1 байт)">DCR<br><span>B</span></td><td class="mov" title="06: MVI B,d8 (2 байт)">MVI<br><span>B,d8</span></td><td class="alu" title="07: RLC (1 байт)">RLC</td><td class="ctl und" title="08: NOP (1 байт)">NOP</td><td class="alu" title="09: DAD B (1 байт)">DAD<br><span>B</span></td><td class="mov" title="0A: LDAX B (1 байт)">LDAX<br><span>B</span></td><td class="alu" title="0B: DCX B (1 байт)">DCX<br><span>B</span></td><td class="alu" title="0C: INR C (1 байт)">INR<br><span>C</span></td><td class="alu" title="0D: DCR C (1 байт)">DCR<br><span>C</span></td><td class="mov" title="0E: MVI C,d8 (2 байт)">MVI<br><span>C,d8</span></td><td class="alu" title="0F: RRC (1 байт)">RRC</td></tr>
+<tr><th>1x</th><td class="ctl und" title="10: NOP (1 байт)">NOP</td><td class="mov" title="11: LXI D,d16 (3 байт)">LXI<br><span>D,d16</span></td><td class="mov" title="12: STAX D (1 байт)">STAX<br><span>D</span></td><td class="alu" title="13: INX D (1 байт)">INX<br><span>D</span></td><td class="alu" title="14: INR D (1 байт)">INR<br><span>D</span></td><td class="alu" title="15: DCR D (1 байт)">DCR<br><span>D</span></td><td class="mov" title="16: MVI D,d8 (2 байт)">MVI<br><span>D,d8</span></td><td class="alu" title="17: RAL (1 байт)">RAL</td><td class="ctl und" title="18: NOP (1 байт)">NOP</td><td class="alu" title="19: DAD D (1 байт)">DAD<br><span>D</span></td><td class="mov" title="1A: LDAX D (1 байт)">LDAX<br><span>D</span></td><td class="alu" title="1B: DCX D (1 байт)">DCX<br><span>D</span></td><td class="alu" title="1C: INR E (1 байт)">INR<br><span>E</span></td><td class="alu" title="1D: DCR E (1 байт)">DCR<br><span>E</span></td><td class="mov" title="1E: MVI E,d8 (2 байт)">MVI<br><span>E,d8</span></td><td class="alu" title="1F: RAR (1 байт)">RAR</td></tr>
+<tr><th>2x</th><td class="ctl und" title="20: NOP (1 байт)">NOP</td><td class="mov" title="21: LXI H,d16 (3 байт)">LXI<br><span>H,d16</span></td><td class="mov" title="22: SHLD a16 (3 байт)">SHLD<br><span>a16</span></td><td class="alu" title="23: INX H (1 байт)">INX<br><span>H</span></td><td class="alu" title="24: INR H (1 байт)">INR<br><span>H</span></td><td class="alu" title="25: DCR H (1 байт)">DCR<br><span>H</span></td><td class="mov" title="26: MVI H,d8 (2 байт)">MVI<br><span>H,d8</span></td><td class="alu" title="27: DAA (1 байт)">DAA</td><td class="ctl und" title="28: NOP (1 байт)">NOP</td><td class="alu" title="29: DAD H (1 байт)">DAD<br><span>H</span></td><td class="mov" title="2A: LHLD a16 (3 байт)">LHLD<br><span>a16</span></td><td class="alu" title="2B: DCX H (1 байт)">DCX<br><span>H</span></td><td class="alu" title="2C: INR L (1 байт)">INR<br><span>L</span></td><td class="alu" title="2D: DCR L (1 байт)">DCR<br><span>L</span></td><td class="mov" title="2E: MVI L,d8 (2 байт)">MVI<br><span>L,d8</span></td><td class="alu" title="2F: CMA (1 байт)">CMA</td></tr>
+<tr><th>3x</th><td class="ctl und" title="30: NOP (1 байт)">NOP</td><td class="mov" title="31: LXI SP,d16 (3 байт)">LXI<br><span>SP,d16</span></td><td class="mov" title="32: STA a16 (3 байт)">STA<br><span>a16</span></td><td class="alu" title="33: INX SP (1 байт)">INX<br><span>SP</span></td><td class="alu" title="34: INR M (1 байт)">INR<br><span>M</span></td><td class="alu" title="35: DCR M (1 байт)">DCR<br><span>M</span></td><td class="mov" title="36: MVI M,d8 (2 байт)">MVI<br><span>M,d8</span></td><td class="alu" title="37: STC (1 байт)">STC</td><td class="ctl und" title="38: NOP (1 байт)">NOP</td><td class="alu" title="39: DAD SP (1 байт)">DAD<br><span>SP</span></td><td class="mov" title="3A: LDA a16 (3 байт)">LDA<br><span>a16</span></td><td class="alu" title="3B: DCX SP (1 байт)">DCX<br><span>SP</span></td><td class="alu" title="3C: INR A (1 байт)">INR<br><span>A</span></td><td class="alu" title="3D: DCR A (1 байт)">DCR<br><span>A</span></td><td class="mov" title="3E: MVI A,d8 (2 байт)">MVI<br><span>A,d8</span></td><td class="alu" title="3F: CMC (1 байт)">CMC</td></tr>
+<tr><th>4x</th><td class="mov" title="40: MOV B,B (1 байт)">MOV<br><span>B,B</span></td><td class="mov" title="41: MOV B,C (1 байт)">MOV<br><span>B,C</span></td><td class="mov" title="42: MOV B,D (1 байт)">MOV<br><span>B,D</span></td><td class="mov" title="43: MOV B,E (1 байт)">MOV<br><span>B,E</span></td><td class="mov" title="44: MOV B,H (1 байт)">MOV<br><span>B,H</span></td><td class="mov" title="45: MOV B,L (1 байт)">MOV<br><span>B,L</span></td><td class="mov" title="46: MOV B,M (1 байт)">MOV<br><span>B,M</span></td><td class="mov" title="47: MOV B,A (1 байт)">MOV<br><span>B,A</span></td><td class="mov" title="48: MOV C,B (1 байт)">MOV<br><span>C,B</span></td><td class="mov" title="49: MOV C,C (1 байт)">MOV<br><span>C,C</span></td><td class="mov" title="4A: MOV C,D (1 байт)">MOV<br><span>C,D</span></td><td class="mov" title="4B: MOV C,E (1 байт)">MOV<br><span>C,E</span></td><td class="mov" title="4C: MOV C,H (1 байт)">MOV<br><span>C,H</span></td><td class="mov" title="4D: MOV C,L (1 байт)">MOV<br><span>C,L</span></td><td class="mov" title="4E: MOV C,M (1 байт)">MOV<br><span>C,M</span></td><td class="mov" title="4F: MOV C,A (1 байт)">MOV<br><span>C,A</span></td></tr>
+<tr><th>5x</th><td class="mov" title="50: MOV D,B (1 байт)">MOV<br><span>D,B</span></td><td class="mov" title="51: MOV D,C (1 байт)">MOV<br><span>D,C</span></td><td class="mov" title="52: MOV D,D (1 байт)">MOV<br><span>D,D</span></td><td class="mov" title="53: MOV D,E (1 байт)">MOV<br><span>D,E</span></td><td class="mov" title="54: MOV D,H (1 байт)">MOV<br><span>D,H</span></td><td class="mov" title="55: MOV D,L (1 байт)">MOV<br><span>D,L</span></td><td class="mov" title="56: MOV D,M (1 байт)">MOV<br><span>D,M</span></td><td class="mov" title="57: MOV D,A (1 байт)">MOV<br><span>D,A</span></td><td class="mov" title="58: MOV E,B (1 байт)">MOV<br><span>E,B</span></td><td class="mov" title="59: MOV E,C (1 байт)">MOV<br><span>E,C</span></td><td class="mov" title="5A: MOV E,D (1 байт)">MOV<br><span>E,D</span></td><td class="mov" title="5B: MOV E,E (1 байт)">MOV<br><span>E,E</span></td><td class="mov" title="5C: MOV E,H (1 байт)">MOV<br><span>E,H</span></td><td class="mov" title="5D: MOV E,L (1 байт)">MOV<br><span>E,L</span></td><td class="mov" title="5E: MOV E,M (1 байт)">MOV<br><span>E,M</span></td><td class="mov" title="5F: MOV E,A (1 байт)">MOV<br><span>E,A</span></td></tr>
+<tr><th>6x</th><td class="mov" title="60: MOV H,B (1 байт)">MOV<br><span>H,B</span></td><td class="mov" title="61: MOV H,C (1 байт)">MOV<br><span>H,C</span></td><td class="mov" title="62: MOV H,D (1 байт)">MOV<br><span>H,D</span></td><td class="mov" title="63: MOV H,E (1 байт)">MOV<br><span>H,E</span></td><td class="mov" title="64: MOV H,H (1 байт)">MOV<br><span>H,H</span></td><td class="mov" title="65: MOV H,L (1 байт)">MOV<br><span>H,L</span></td><td class="mov" title="66: MOV H,M (1 байт)">MOV<br><span>H,M</span></td><td class="mov" title="67: MOV H,A (1 байт)">MOV<br><span>H,A</span></td><td class="mov" title="68: MOV L,B (1 байт)">MOV<br><span>L,B</span></td><td class="mov" title="69: MOV L,C (1 байт)">MOV<br><span>L,C</span></td><td class="mov" title="6A: MOV L,D (1 байт)">MOV<br><span>L,D</span></td><td class="mov" title="6B: MOV L,E (1 байт)">MOV<br><span>L,E</span></td><td class="mov" title="6C: MOV L,H (1 байт)">MOV<br><span>L,H</span></td><td class="mov" title="6D: MOV L,L (1 байт)">MOV<br><span>L,L</span></td><td class="mov" title="6E: MOV L,M (1 байт)">MOV<br><span>L,M</span></td><td class="mov" title="6F: MOV L,A (1 байт)">MOV<br><span>L,A</span></td></tr>
+<tr><th>7x</th><td class="mov" title="70: MOV M,B (1 байт)">MOV<br><span>M,B</span></td><td class="mov" title="71: MOV M,C (1 байт)">MOV<br><span>M,C</span></td><td class="mov" title="72: MOV M,D (1 байт)">MOV<br><span>M,D</span></td><td class="mov" title="73: MOV M,E (1 байт)">MOV<br><span>M,E</span></td><td class="mov" title="74: MOV M,H (1 байт)">MOV<br><span>M,H</span></td><td class="mov" title="75: MOV M,L (1 байт)">MOV<br><span>M,L</span></td><td class="ctl" title="76: HLT (1 байт)">HLT</td><td class="mov" title="77: MOV M,A (1 байт)">MOV<br><span>M,A</span></td><td class="mov" title="78: MOV A,B (1 байт)">MOV<br><span>A,B</span></td><td class="mov" title="79: MOV A,C (1 байт)">MOV<br><span>A,C</span></td><td class="mov" title="7A: MOV A,D (1 байт)">MOV<br><span>A,D</span></td><td class="mov" title="7B: MOV A,E (1 байт)">MOV<br><span>A,E</span></td><td class="mov" title="7C: MOV A,H (1 байт)">MOV<br><span>A,H</span></td><td class="mov" title="7D: MOV A,L (1 байт)">MOV<br><span>A,L</span></td><td class="mov" title="7E: MOV A,M (1 байт)">MOV<br><span>A,M</span></td><td class="mov" title="7F: MOV A,A (1 байт)">MOV<br><span>A,A</span></td></tr>
+<tr><th>8x</th><td class="alu" title="80: ADD B (1 байт)">ADD<br><span>B</span></td><td class="alu" title="81: ADD C (1 байт)">ADD<br><span>C</span></td><td class="alu" title="82: ADD D (1 байт)">ADD<br><span>D</span></td><td class="alu" title="83: ADD E (1 байт)">ADD<br><span>E</span></td><td class="alu" title="84: ADD H (1 байт)">ADD<br><span>H</span></td><td class="alu" title="85: ADD L (1 байт)">ADD<br><span>L</span></td><td class="alu" title="86: ADD M (1 байт)">ADD<br><span>M</span></td><td class="alu" title="87: ADD A (1 байт)">ADD<br><span>A</span></td><td class="alu" title="88: ADC B (1 байт)">ADC<br><span>B</span></td><td class="alu" title="89: ADC C (1 байт)">ADC<br><span>C</span></td><td class="alu" title="8A: ADC D (1 байт)">ADC<br><span>D</span></td><td class="alu" title="8B: ADC E (1 байт)">ADC<br><span>E</span></td><td class="alu" title="8C: ADC H (1 байт)">ADC<br><span>H</span></td><td class="alu" title="8D: ADC L (1 байт)">ADC<br><span>L</span></td><td class="alu" title="8E: ADC M (1 байт)">ADC<br><span>M</span></td><td class="alu" title="8F: ADC A (1 байт)">ADC<br><span>A</span></td></tr>
+<tr><th>9x</th><td class="alu" title="90: SUB B (1 байт)">SUB<br><span>B</span></td><td class="alu" title="91: SUB C (1 байт)">SUB<br><span>C</span></td><td class="alu" title="92: SUB D (1 байт)">SUB<br><span>D</span></td><td class="alu" title="93: SUB E (1 байт)">SUB<br><span>E</span></td><td class="alu" title="94: SUB H (1 байт)">SUB<br><span>H</span></td><td class="alu" title="95: SUB L (1 байт)">SUB<br><span>L</span></td><td class="alu" title="96: SUB M (1 байт)">SUB<br><span>M</span></td><td class="alu" title="97: SUB A (1 байт)">SUB<br><span>A</span></td><td class="alu" title="98: SBB B (1 байт)">SBB<br><span>B</span></td><td class="alu" title="99: SBB C (1 байт)">SBB<br><span>C</span></td><td class="alu" title="9A: SBB D (1 байт)">SBB<br><span>D</span></td><td class="alu" title="9B: SBB E (1 байт)">SBB<br><span>E</span></td><td class="alu" title="9C: SBB H (1 байт)">SBB<br><span>H</span></td><td class="alu" title="9D: SBB L (1 байт)">SBB<br><span>L</span></td><td class="alu" title="9E: SBB M (1 байт)">SBB<br><span>M</span></td><td class="alu" title="9F: SBB A (1 байт)">SBB<br><span>A</span></td></tr>
+<tr><th>Ax</th><td class="alu" title="A0: ANA B (1 байт)">ANA<br><span>B</span></td><td class="alu" title="A1: ANA C (1 байт)">ANA<br><span>C</span></td><td class="alu" title="A2: ANA D (1 байт)">ANA<br><span>D</span></td><td class="alu" title="A3: ANA E (1 байт)">ANA<br><span>E</span></td><td class="alu" title="A4: ANA H (1 байт)">ANA<br><span>H</span></td><td class="alu" title="A5: ANA L (1 байт)">ANA<br><span>L</span></td><td class="alu" title="A6: ANA M (1 байт)">ANA<br><span>M</span></td><td class="alu" title="A7: ANA A (1 байт)">ANA<br><span>A</span></td><td class="alu" title="A8: XRA B (1 байт)">XRA<br><span>B</span></td><td class="alu" title="A9: XRA C (1 байт)">XRA<br><span>C</span></td><td class="alu" title="AA: XRA D (1 байт)">XRA<br><span>D</span></td><td class="alu" title="AB: XRA E (1 байт)">XRA<br><span>E</span></td><td class="alu" title="AC: XRA H (1 байт)">XRA<br><span>H</span></td><td class="alu" title="AD: XRA L (1 байт)">XRA<br><span>L</span></td><td class="alu" title="AE: XRA M (1 байт)">XRA<br><span>M</span></td><td class="alu" title="AF: XRA A (1 байт)">XRA<br><span>A</span></td></tr>
+<tr><th>Bx</th><td class="alu" title="B0: ORA B (1 байт)">ORA<br><span>B</span></td><td class="alu" title="B1: ORA C (1 байт)">ORA<br><span>C</span></td><td class="alu" title="B2: ORA D (1 байт)">ORA<br><span>D</span></td><td class="alu" title="B3: ORA E (1 байт)">ORA<br><span>E</span></td><td class="alu" title="B4: ORA H (1 байт)">ORA<br><span>H</span></td><td class="alu" title="B5: ORA L (1 байт)">ORA<br><span>L</span></td><td class="alu" title="B6: ORA M (1 байт)">ORA<br><span>M</span></td><td class="alu" title="B7: ORA A (1 байт)">ORA<br><span>A</span></td><td class="alu" title="B8: CMP B (1 байт)">CMP<br><span>B</span></td><td class="alu" title="B9: CMP C (1 байт)">CMP<br><span>C</span></td><td class="alu" title="BA: CMP D (1 байт)">CMP<br><span>D</span></td><td class="alu" title="BB: CMP E (1 байт)">CMP<br><span>E</span></td><td class="alu" title="BC: CMP H (1 байт)">CMP<br><span>H</span></td><td class="alu" title="BD: CMP L (1 байт)">CMP<br><span>L</span></td><td class="alu" title="BE: CMP M (1 байт)">CMP<br><span>M</span></td><td class="alu" title="BF: CMP A (1 байт)">CMP<br><span>A</span></td></tr>
+<tr><th>Cx</th><td class="jmp" title="C0: RNZ (1 байт)">RNZ</td><td class="stk" title="C1: POP B (1 байт)">POP<br><span>B</span></td><td class="jmp" title="C2: JNZ a16 (3 байт)">JNZ<br><span>a16</span></td><td class="jmp" title="C3: JMP a16 (3 байт)">JMP<br><span>a16</span></td><td class="jmp" title="C4: CNZ a16 (3 байт)">CNZ<br><span>a16</span></td><td class="stk" title="C5: PUSH B (1 байт)">PUSH<br><span>B</span></td><td class="alu" title="C6: ADI d8 (2 байт)">ADI<br><span>d8</span></td><td class="jmp" title="C7: RST 0 (1 байт)">RST<br><span>0</span></td><td class="jmp" title="C8: RZ (1 байт)">RZ</td><td class="jmp" title="C9: RET (1 байт)">RET</td><td class="jmp" title="CA: JZ a16 (3 байт)">JZ<br><span>a16</span></td><td class="jmp und" title="CB: JMP a16 (3 байт)">JMP<br><span>a16</span></td><td class="jmp" title="CC: CZ a16 (3 байт)">CZ<br><span>a16</span></td><td class="jmp" title="CD: CALL a16 (3 байт)">CALL<br><span>a16</span></td><td class="alu" title="CE: ACI d8 (2 байт)">ACI<br><span>d8</span></td><td class="jmp" title="CF: RST 1 (1 байт)">RST<br><span>1</span></td></tr>
+<tr><th>Dx</th><td class="jmp" title="D0: RNC (1 байт)">RNC</td><td class="stk" title="D1: POP D (1 байт)">POP<br><span>D</span></td><td class="jmp" title="D2: JNC a16 (3 байт)">JNC<br><span>a16</span></td><td class="ctl" title="D3: OUT d8 (2 байт)">OUT<br><span>d8</span></td><td class="jmp" title="D4: CNC a16 (3 байт)">CNC<br><span>a16</span></td><td class="stk" title="D5: PUSH D (1 байт)">PUSH<br><span>D</span></td><td class="alu" title="D6: SUI d8 (2 байт)">SUI<br><span>d8</span></td><td class="jmp" title="D7: RST 2 (1 байт)">RST<br><span>2</span></td><td class="jmp" title="D8: RC (1 байт)">RC</td><td class="jmp und" title="D9: RET (1 байт)">RET</td><td class="jmp" title="DA: JC a16 (3 байт)">JC<br><span>a16</span></td><td class="ctl" title="DB: IN d8 (2 байт)">IN<br><span>d8</span></td><td class="jmp" title="DC: CC a16 (3 байт)">CC<br><span>a16</span></td><td class="jmp und" title="DD: CALL a16 (3 байт)">CALL<br><span>a16</span></td><td class="alu" title="DE: SBI d8 (2 байт)">SBI<br><span>d8</span></td><td class="jmp" title="DF: RST 3 (1 байт)">RST<br><span>3</span></td></tr>
+<tr><th>Ex</th><td class="jmp" title="E0: RPO (1 байт)">RPO</td><td class="stk" title="E1: POP H (1 байт)">POP<br><span>H</span></td><td class="jmp" title="E2: JPO a16 (3 байт)">JPO<br><span>a16</span></td><td class="stk" title="E3: XTHL (1 байт)">XTHL</td><td class="jmp" title="E4: CPO a16 (3 байт)">CPO<br><span>a16</span></td><td class="stk" title="E5: PUSH H (1 байт)">PUSH<br><span>H</span></td><td class="alu" title="E6: ANI d8 (2 байт)">ANI<br><span>d8</span></td><td class="jmp" title="E7: RST 4 (1 байт)">RST<br><span>4</span></td><td class="jmp" title="E8: RPE (1 байт)">RPE</td><td class="jmp" title="E9: PCHL (1 байт)">PCHL</td><td class="jmp" title="EA: JPE a16 (3 байт)">JPE<br><span>a16</span></td><td class="mov" title="EB: XCHG (1 байт)">XCHG</td><td class="jmp" title="EC: CPE a16 (3 байт)">CPE<br><span>a16</span></td><td class="jmp und" title="ED: CALL a16 (3 байт)">CALL<br><span>a16</span></td><td class="alu" title="EE: XRI d8 (2 байт)">XRI<br><span>d8</span></td><td class="jmp" title="EF: RST 5 (1 байт)">RST<br><span>5</span></td></tr>
+<tr><th>Fx</th><td class="jmp" title="F0: RP (1 байт)">RP</td><td class="stk" title="F1: POP PSW (1 байт)">POP<br><span>PSW</span></td><td class="jmp" title="F2: JP a16 (3 байт)">JP<br><span>a16</span></td><td class="ctl" title="F3: DI (1 байт)">DI</td><td class="jmp" title="F4: CP a16 (3 байт)">CP<br><span>a16</span></td><td class="stk" title="F5: PUSH PSW (1 байт)">PUSH<br><span>PSW</span></td><td class="alu" title="F6: ORI d8 (2 байт)">ORI<br><span>d8</span></td><td class="jmp" title="F7: RST 6 (1 байт)">RST<br><span>6</span></td><td class="jmp" title="F8: RM (1 байт)">RM</td><td class="stk" title="F9: SPHL (1 байт)">SPHL</td><td class="jmp" title="FA: JM a16 (3 байт)">JM<br><span>a16</span></td><td class="ctl" title="FB: EI (1 байт)">EI</td><td class="jmp" title="FC: CM a16 (3 байт)">CM<br><span>a16</span></td><td class="jmp und" title="FD: CALL a16 (3 байт)">CALL<br><span>a16</span></td><td class="alu" title="FE: CPI d8 (2 байт)">CPI<br><span>d8</span></td><td class="jmp" title="FF: RST 7 (1 байт)">RST<br><span>7</span></td></tr></table></div>
+<p>Блеклые курсивные коды (08, 10, …, 38, CB, D9, DD, ED, FD) Intel не описывала. На настоящем 8080 они повторяют соседние команды: NOP, JMP, RET, CALL. В программах их не используют.</p>
+
+<h2 id="s18">18. Ассемблер: запись программы</h2>
+<p>Программу на ассемблере пишут построчно, одна команда — одна строка:</p>
+<pre>МЕТКА:  КОМАНДА  ОПЕРАНДЫ    ; комментарий</pre>
+<ul>
+<li><b>Метка</b> — имя адреса. Вместо <code>JNZ 0006</code> пишут <code>JNZ LOOP</code>, а ассемблер сам подставит адрес. Метка ставится в начале строки, после неё двоеточие.</li>
+<li><b>Комментарий</b> — всё после <code>;</code>. Процессор его не видит, он для человека.</li>
+<li><b>Числа</b>: <code>10</code> — десятичное, <code>10H</code> или <code>0AH</code> — шестнадцатеричное (если начинается с буквы, впереди ставят 0: <code>0FFH</code>), <code>'A'</code> — код буквы.</li>
+</ul>
+<h3>Директивы</h3>
+<p>Директивы — указания самому ассемблеру, а не процессору:</p>
+<table>
+<tr><th>Директива</th><th>Пример</th><th>Значит</th></tr>
+<tr><td><code>ORG адрес</code></td><td><code>ORG 0100H</code></td><td>дальше размещать с этого адреса</td></tr>
+<tr><td><code>имя EQU число</code></td><td><code>SCREEN EQU 9000H</code></td><td>дать числу имя (в память ничего не пишет)</td></tr>
+<tr><td><code>DB</code></td><td><code>DB 1, 2, 'A', "ТЕКСТ", 0</code></td><td>записать байты как есть: таблицы, тексты</td></tr>
+<tr><td><code>DW</code></td><td><code>DW START, 1234H</code></td><td>записать 16-разрядные слова (младший байт первым)</td></tr>
+<tr><td><code>DS n</code></td><td><code>BUF: DS 64</code></td><td>оставить n байт под данные</td></tr>
+<tr><td><code>END</code></td><td><code>END</code></td><td>конец текста</td></tr>
+</table>
+<p>Пример с метками и директивами (тот же цикл, что в разделе 20):</p>
+<pre><span class="c">; заполнить экран узором</span>
+SCREEN  EQU  9000H
+SIZE    EQU  3000H          <span class="c">; 12 КБ</span>
+        ORG  0
+START:  LXI  H,SCREEN
+        LXI  B,SIZE
+LOOP:   MVI  M,55H
+        INX  H
+        DCX  B
+        MOV  A,B
+        ORA  C
+        JNZ  LOOP
+        RET
+        END</pre>
+<p>Ассемблер проходит текст дважды: в первый раз считает адреса всех меток, во второй — выдаёт байты, подставляя адреса. Поэтому можно ссылаться и на метки, которые описаны ниже.</p>
+
+<h2 id="s19">19. Приёмы программирования</h2>
+<h3>Цикл со счётчиком</h3>
+<pre>        MVI  B,10H     <span class="c">; 16 раз</span>
+LOOP:   ...            <span class="c">; тело цикла</span>
+        DCR  B
+        JNZ  LOOP</pre>
+<p>Если повторений больше 256 — счётчик в паре: <code>DCX B</code> / <code>MOV A,B</code> / <code>ORA C</code> / <code>JNZ</code>.</p>
+<h3>Обнулить A и сбросить перенос</h3>
+<p><code>XRA A</code> — 1 байт, 4 такта, вместо <code>MVI A,0</code> (2 байта, 7 тактов). Заодно CY = 0 и Z = 1.</p>
+<h3>Проверить A на ноль</h3>
+<p><code>ORA A</code> — A не меняется, но флаги Z и S ставятся по A. После <code>LDA</code> или <code>MOV</code> это нужно: пересылки флаги не трогают.</p>
+<h3>Умножение и деление на 2</h3>
+<p>Байт: <code>ADD A</code> — умножить A на 2; <code>ORA A</code> + <code>RAR</code> — разделить на 2 (сначала сбросить CY). Пара HL: <code>DAD H</code> — умножить на 2.</p>
+<h3>16-разрядное сравнение HL и DE</h3>
+<pre>        MOV  A,H
+        CMP  D
+        JNZ  РАЗНЫЕ    <span class="c">; старшие разные — CY уже говорит, кто меньше</span>
+        MOV  A,L
+        CMP  E         <span class="c">; Z: HL = DE;  CY: HL &lt; DE</span></pre>
+<h3>Таблица переходов</h3>
+<pre>        <span class="c">; A = номер действия 0..2</span>
+        ADD  A         <span class="c">; × 2: каждый адрес 2 байта</span>
+        MOV  E,A
+        MVI  D,0
+        LXI  H,TABLE
+        DAD  D
+        MOV  E,M       <span class="c">; DE = адрес из таблицы</span>
+        INX  H
+        MOV  D,M
+        XCHG           <span class="c">; HL = адрес</span>
+        PCHL           <span class="c">; прыжок</span>
+TABLE:  DW   ACT0, ACT1, ACT2</pre>
+<h3>Сохранить регистры в подпрограмме</h3>
+<pre>SUB:    PUSH B
+        PUSH D
+        PUSH H
+        ...
+        POP  H         <span class="c">; снимать в обратном порядке!</span>
+        POP  D
+        POP  B
+        RET</pre>
+<h3>Сколько времени идёт цикл</h3>
+<p>Сложите такты всех команд тела и умножьте на число повторений. Пример: <code>DCR B</code> (5) + <code>JNZ</code> (10) = 15 тактов = 7,5 мкс за круг; 256 кругов — около 1,9 мс.</p>
+
+<h2 id="s20">20. Примеры для «Специалиста»</h2>
+<p>Все примеры проверены: собраны ассемблером и запущены на эмуляторе «Специалиста» с Монитором-2. Слева адрес, затем байты, затем текст программы. Байты можно ввести в «Памяти» оболочки или командой монитора, а потом запустить с адреса 0000.</p>
+<h3>Подпрограммы монитора</h3>
+<p>Монитор «Специалиста» даёт готовые подпрограммы по постоянным адресам. Их вызывают командой <code>CALL</code>:</p>
+<table>
+<tr><th>Адрес</th><th>Что делает</th></tr>
+<tr><td><code>C800</code></td><td>перезапуск монитора (выход из программы: <code>JMP C800</code>)</td></tr>
+<tr><td><code>C803</code></td><td>ждать нажатия клавиши → код в A</td></tr>
+<tr><td><code>C806</code></td><td>прочитать байт с магнитофона → A</td></tr>
+<tr><td><code>C809</code></td><td>вывести символ из регистра C</td></tr>
+<tr><td><code>C80C</code></td><td>записать байт A на магнитофон</td></tr>
+<tr><td><code>C812</code>, <code>C81B</code></td><td>код нажатой клавиши без ожидания (FF — не нажата)</td></tr>
+<tr><td><code>C815</code></td><td>вывести A двумя hex-цифрами</td></tr>
+<tr><td><code>C818</code></td><td>вывести строку по адресу HL до байта 00</td></tr>
+<tr><td><code>C81E</code></td><td>положение курсора → HL</td></tr>
+<tr><td><code>C82A</code></td><td>контрольная сумма участка HL…DE → BC</td></tr>
+</table>
+<h3>1. «Привет»</h3>
+<pre><span class="c">                      ORG 0000h</span>
+<span class="a">0000</span>  <span class="b">21 0C 00      </span>  START:  LXI H,TXT       <span class="c">; HL = адрес строки</span>
+<span class="a">0003</span>  <span class="b">CD 18 C8      </span>          CALL 0C818h     <span class="c">; монитор: печать строки до 00</span>
+<span class="a">0006</span>  <span class="b">CD 03 C8      </span>          CALL 0C803h     <span class="c">; монитор: ждать клавишу</span>
+<span class="a">0009</span>  <span class="b">C3 00 C8      </span>          JMP 0C800h      <span class="c">; выход в монитор</span>
+<span class="a">000C</span>  <span class="b">0D 0A         </span>  TXT:    DB 0Dh,0Ah      <span class="c">; с новой строки</span>
+<span class="a">000E</span>  <span class="b">70 72 69 77 … </span>          DB   &quot;ПРИВЕТ, СПЕЦИАЛИСТ!&quot;,0</pre>
+<p>Русские заглавные буквы в мониторе — это коды 60–7F (кодировка КОИ-7): <code>П</code> = 70, <code>Р</code> = 72 и так далее. Байты <code>0D 0A</code> переводят строку.</p>
+<h3>2. Заполнить экран узором</h3>
+<pre><span class="c">                      ORG 0000h</span>
+<span class="a">0000</span>  <span class="b">21 00 90      </span>  START:  LXI H,9000h     <span class="c">; HL - начало экрана</span>
+<span class="a">0003</span>  <span class="b">01 00 30      </span>          LXI B,3000h     <span class="c">; BC - сколько байт (12 КБ)</span>
+<span class="a">0006</span>  <span class="b">36 55         </span>  LOOP:   MVI M,55h       <span class="c">; 01010101: точка через одну</span>
+<span class="a">0008</span>  <span class="b">23            </span>          INX H           <span class="c">; следующий байт</span>
+<span class="a">0009</span>  <span class="b">0B            </span>          DCX B           <span class="c">; счётчик - 1 (флаги НЕ меняет!)</span>
+<span class="a">000A</span>  <span class="b">78            </span>          MOV A,B
+<span class="a">000B</span>  <span class="b">B1            </span>          ORA C           <span class="c">; A = B ИЛИ C: ноль, только если BC = 0</span>
+<span class="a">000C</span>  <span class="b">C2 06 00      </span>          JNZ LOOP
+<span class="a">000F</span>  <span class="b">CD 03 C8      </span>          CALL 0C803h     <span class="c">; ждать клавишу</span>
+<span class="a">0012</span>  <span class="b">C3 00 C8      </span>          JMP 0C800h</pre>
+<p>Тело цикла — 39 тактов, повторов 3000H = 12288, всего около 0,24 с: видно, как экран заливается. Попробуйте вместо 55 другие числа: FF — сплошной белый, 0F — полосы по 4 точки, AA — сдвинутый узор.</p>
+<h3>3. Точка и линия</h3>
+<pre><span class="c">                      ORG 0000h</span>
+<span class="a">0000</span>  <span class="b">0E 00         </span>  START:  MVI C,0         <span class="c">; C = y, и x тоже</span>
+<span class="a">0002</span>  <span class="b">79            </span>  NEXT:   MOV A,C         <span class="c">; A = x</span>
+<span class="a">0003</span>  <span class="b">CD 10 00      </span>          CALL PLOT
+<span class="a">0006</span>  <span class="b">0C            </span>          INR C
+<span class="a">0007</span>  <span class="b">C2 02 00      </span>          JNZ NEXT        <span class="c">; после 255 C снова 0: Z=1, конец</span>
+<span class="a">000A</span>  <span class="b">CD 03 C8      </span>          CALL 0C803h
+<span class="a">000D</span>  <span class="b">C3 00 C8      </span>          JMP 0C800h
+<span class="a">0010</span>  <span class="b">47            </span>  PLOT:   MOV B,A
+<span class="a">0011</span>  <span class="b">0F            </span>          RRC             <span class="c">; столбец = x / 8</span>
+<span class="a">0012</span>  <span class="b">0F            </span>          RRC
+<span class="a">0013</span>  <span class="b">0F            </span>          RRC
+<span class="a">0014</span>  <span class="b">E6 1F         </span>          ANI 1Fh
+<span class="a">0016</span>  <span class="b">C6 90         </span>          ADI 90h         <span class="c">; H = 90 + столбец</span>
+<span class="a">0018</span>  <span class="b">67            </span>          MOV H,A
+<span class="a">0019</span>  <span class="b">69            </span>          MOV L,C         <span class="c">; L = строка</span>
+<span class="a">001A</span>  <span class="b">78            </span>          MOV A,B
+<span class="a">001B</span>  <span class="b">E6 07         </span>          ANI 07h         <span class="c">; номер точки в байте 0..7</span>
+<span class="a">001D</span>  <span class="b">47            </span>          MOV B,A
+<span class="a">001E</span>  <span class="b">04            </span>          INR B
+<span class="a">001F</span>  <span class="b">3E 80         </span>          MVI A,80h       <span class="c">; 10000000 - самая левая точка</span>
+<span class="a">0021</span>  <span class="b">05            </span>  SHIFT:  DCR B
+<span class="a">0022</span>  <span class="b">CA 29 00      </span>          JZ PUT
+<span class="a">0025</span>  <span class="b">0F            </span>          RRC             <span class="c">; сдвинуть вправо на нужное место</span>
+<span class="a">0026</span>  <span class="b">C3 21 00      </span>          JMP SHIFT
+<span class="a">0029</span>  <span class="b">B6            </span>  PUT:    ORA M           <span class="c">; добавить точку к тому, что уже есть</span>
+<span class="a">002A</span>  <span class="b">77            </span>          MOV M,A
+<span class="a">002B</span>  <span class="b">C9            </span>          RET</pre>
+<p>Здесь видно, как устроен экран (раздел 6): номер столбца — старшая часть адреса, строка — младшая, а точка внутри байта — один бит. <code>ORA M</code> добавляет точку, не стирая соседние. Если заменить на <code>XRA M</code>, повторный вызов будет точку стирать — так рисуют движущиеся спрайты.</p>
+<h3>4. Умножение 8×8 → 16</h3>
+<pre><span class="c">                      ORG 0100h</span>
+<span class="a">0100</span>  <span class="b">21 00 00      </span>  MUL8:   LXI H,0         <span class="c">; результат</span>
+<span class="a">0103</span>  <span class="b">16 00         </span>          MVI D,0         <span class="c">; DE = множимое (E), D обнулить</span>
+<span class="a">0105</span>  <span class="b">06 08         </span>          MVI B,8         <span class="c">; 8 бит множителя</span>
+<span class="a">0107</span>  <span class="b">79            </span>          MOV A,C         <span class="c">; множитель в C -&gt; A</span>
+<span class="a">0108</span>  <span class="b">1F            </span>  MLOOP:  RAR             <span class="c">; младший бит множителя -&gt; CY</span>
+<span class="a">0109</span>  <span class="b">D2 0D 01      </span>          JNC MSKIP
+<span class="a">010C</span>  <span class="b">19            </span>          DAD D           <span class="c">; бит = 1: прибавить множимое</span>
+<span class="a">010D</span>  <span class="b">EB            </span>  MSKIP:  XCHG
+<span class="a">010E</span>  <span class="b">29            </span>          DAD H           <span class="c">; множимое * 2</span>
+<span class="a">010F</span>  <span class="b">EB            </span>          XCHG
+<span class="a">0110</span>  <span class="b">05            </span>          DCR B
+<span class="a">0111</span>  <span class="b">C2 08 01      </span>          JNZ MLOOP
+<span class="a">0114</span>  <span class="b">C9            </span>          RET</pre>
+<p>«Умножение в столбик» в двоичной системе: для каждого бита множителя, если он 1, к результату прибавляется множимое, а множимое каждый раз удваивается. Проверено на всех парах с шагом 7 и 13.</p>
+<h3>5. Задержка</h3>
+<pre><span class="c">                      ORG 0200h</span>
+<span class="a">0200</span>  <span class="b">0B            </span>  DELAY:  DCX B           <span class="c">;  5 тактов</span>
+<span class="a">0201</span>  <span class="b">78            </span>          MOV A,B         <span class="c">;  5</span>
+<span class="a">0202</span>  <span class="b">B1            </span>          ORA C           <span class="c">;  4</span>
+<span class="a">0203</span>  <span class="b">C2 00 02      </span>          JNZ DELAY       <span class="c">; 10  -&gt; 24 такта = 12 мкс за круг</span>
+<span class="a">0206</span>  <span class="b">C9            </span>          RET</pre>
+<p>Один круг — 24 такта = 12 мкс. Чтобы подождать 0,1 с, нужно <code>LXI B,2000H</code> (8192 круга ≈ 98 мс) и <code>CALL DELAY</code>.</p>
+
+<h2 id="s21">21. Шпаргалка</h2>
+<div class="wrap"><table>
+<tr><th>Нужно</th><th>Команды</th></tr>
+<tr><td>Число в регистр</td><td><code>MVI r,d8</code>, пара — <code>LXI rp,d16</code></td></tr>
+<tr><td>Из памяти / в память</td><td><code>LDA</code>/<code>STA</code> (A), <code>LHLD</code>/<code>SHLD</code> (HL), <code>MOV r,M</code>/<code>MOV M,r</code> (по HL), <code>LDAX</code>/<code>STAX</code> (по BC/DE)</td></tr>
+<tr><td>Сложить / вычесть</td><td><code>ADD</code>, <code>ADI</code>, <code>SUB</code>, <code>SUI</code>; с переносом <code>ADC</code>, <code>SBB</code>; 16 бит — <code>DAD</code></td></tr>
+<tr><td>+1 / −1</td><td><code>INR</code>/<code>DCR</code> (с флагами), <code>INX</code>/<code>DCX</code> (пары, без флагов)</td></tr>
+<tr><td>Биты</td><td><code>ANI</code> — выключить, <code>ORI</code> — включить, <code>XRI</code> — переключить</td></tr>
+<tr><td>Сравнить</td><td><code>CMP r</code>, <code>CPI d8</code> → <code>JZ</code>/<code>JNZ</code>/<code>JC</code>/<code>JNC</code></td></tr>
+<tr><td>Сдвинуть</td><td><code>RLC</code>, <code>RRC</code>, <code>RAL</code>, <code>RAR</code>; ×2 — <code>ADD A</code>, <code>DAD H</code></td></tr>
+<tr><td>Перейти / вызвать / вернуться</td><td><code>JMP</code>, <code>CALL</code>, <code>RET</code> и условные варианты</td></tr>
+<tr><td>Сохранить / восстановить</td><td><code>PUSH</code> / <code>POP</code> (обратный порядок)</td></tr>
+<tr><td>Обнулить A</td><td><code>XRA A</code></td></tr>
+<tr><td>Проверить A</td><td><code>ORA A</code></td></tr>
+</table></div>
+<h3>Частые ошибки</h3>
+<ul>
+<li><code>DCX</code>/<code>INX</code> не ставят флаг Z — нельзя сразу делать <code>JNZ</code>.</li>
+<li><code>MOV</code>, <code>MVI</code>, <code>LDA</code> не ставят флаги — перед <code>JZ</code> нужен <code>ORA A</code> или <code>CPI</code>.</li>
+<li>Лишний <code>PUSH</code> без <code>POP</code> — <code>RET</code> уйдёт не туда.</li>
+<li>Стек растёт вниз: если поставить SP прямо под своими данными, стек их затрёт.</li>
+<li>Порядок байтов: в памяти адрес 1234 лежит как <code>34 12</code>.</li>
+<li>Процессор не отличает код от данных: текст или таблица не должны стоять на пути выполнения.</li>
+</ul>
+<p class="lead" style="margin-top:2em">Источники: описание системы команд Intel 8080 (Intel 8080 Microcomputer Systems User's Manual, 1975), справочники по КР580ВМ80А; адреса подпрограмм — по Монитору-2 «Специалиста». Такты указаны для 8080; на КР580ВМ80А они такие же.</p>
+</main>
+</body>
+</html>
