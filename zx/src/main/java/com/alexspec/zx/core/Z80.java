@@ -27,6 +27,10 @@ public final class Z80 {
             return read(addr);
         }
 
+        /** operand byte of a branch not taken: on the bus but not used (for tracing only) */
+        default void skipped(int addr) {
+        }
+
         /** is this memory address subject to ULA contention */
         boolean contended(int addr);
 
@@ -151,6 +155,7 @@ public final class Z80 {
     private void skip() {
         contend(pc);
         t += 3;
+        bus.skipped(pc);
         pc = (pc + 1) & 0xFFFF;
     }
 

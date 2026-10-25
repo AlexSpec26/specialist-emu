@@ -452,20 +452,22 @@ final class MapPanel {
             if (a < 0x8000 && b != null) out.add("ОЗУ 4000–7FFF: доступ притормаживает ULA");
         }
         StringBuilder acc = new StringBuilder();
-        appendAgo(acc, "чтение", trace.lastRead[a], trace.now);
-        appendAgo(acc, "запись", trace.lastWrite[a], trace.now);
-        appendAgo(acc, "исполнение", trace.lastExec[a], trace.now);
+        long tnow = machine.time();
+        appendAgo(acc, "чтение", trace.lastRead[a], tnow);
+        appendAgo(acc, "запись", trace.lastWrite[a], tnow);
+        appendAgo(acc, "исполнение", trace.lastExec[a], tnow);
         out.add(acc.length() == 0 ? "обращений не было" : acc.toString());
         return out.toArray(new String[0]);
     }
 
-    private static void appendAgo(StringBuilder sb, String what, int stamp, int now) {
-        if (stamp == 0) return;
-        float sec = (now - stamp) / 50f;
+    private static void appendAgo(StringBuilder sb, String what, long stamp, long now) {
+        long age = now - stamp;
+        if (age < 0 || age > 1L << 40) return;
         if (sb.length() > 0) sb.append(", ");
-        if (sec < 0.05f) sb.append(what).append(" сейчас");
-        else sb.append(what).append(String.format(java.util.Locale.US, " %.1f с назад", sec));
+        if (age < 100_000) sb.append(what).append(String.format(java.util.Locale.US, " %d т. назад", age));
+        else sb.append(what).append(String.format(java.util.Locale.US, " %.1f с назад", age / 3_500_000f));
     }
+
 
     // ------------------------------------------------------------------ tutorial
 

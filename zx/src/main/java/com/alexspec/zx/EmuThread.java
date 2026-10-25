@@ -50,6 +50,8 @@ final class EmuThread extends Thread {
     volatile boolean sound = true;
     /** run the emulation fast while a real-time (non-instant) tape load is going on */
     volatile boolean turboLoad = true;
+    /** single-step mode (paused and stepping): only the last instruction lights up on the map */
+    volatile boolean stepping;
     /** true while the turbo is actually running (for the UI) */
     volatile boolean turboActive;
 
@@ -212,7 +214,6 @@ final class EmuThread extends Thread {
             }
             // the trace clock follows real time, so flashes last the same at any emulation speed
             if (machine.trace.enabled) {
-                machine.trace.tick();
                 if ((++frameCount & 1) == 0) renderMap(); // 25 Hz is plenty for the map
             }
             publish();
@@ -265,6 +266,13 @@ final class EmuThread extends Thread {
     private void renderMap() {
         if (!machine.trace.enabled) return;
         int layout = machine.trace.layout;
+        MemTrace tr = machine.trace;
+        tr.now = machine.time();
+        // a flash lasts the same in real time at any speed, but at least one instruction
+        double sp = Math.max(1.0 / Spectrum48.CPU_HZ, Math.min(4, speed));
+        long w = (long) (tr.flashFrames / 50.0 * sp * Spectrum48.CPU_HZ);
+        tr.window = Math.max(w, tr.now - machine.lastInstrStart + 1);
+        tr.stepFrom = stepping ? machine.lastInstrStart : -1;
         machine.trace.render(machine, mapBack, layout);
         int n = MemTrace.width(layout) * MemTrace.height(layout);
         synchronized (mapFrame) {

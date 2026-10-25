@@ -131,26 +131,31 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
 
     @Override
     public int read(int addr) {
-        if (trace.enabled) trace.lastRead[addr] = trace.now;
+        if (trace.enabled) trace.lastRead[addr] = (long) frameCount * T_FRAME + cpu.t;
         return mem[addr] & 0xFF;
     }
 
     @Override
     public int fetch(int addr) {
-        if (trace.enabled) trace.lastExec[addr] = trace.now;
+        if (trace.enabled) trace.lastExec[addr] = (long) frameCount * T_FRAME + cpu.t;
         return mem[addr] & 0xFF;
     }
 
     @Override
     public int arg(int addr) {
-        if (trace.enabled) trace.lastExec[addr] = trace.now;
+        if (trace.enabled) trace.lastExec[addr] = (long) frameCount * T_FRAME + cpu.t;
         return mem[addr] & 0xFF;
+    }
+
+    @Override
+    public void skipped(int addr) {
+        if (trace.enabled) trace.lastExec[addr] = (long) frameCount * T_FRAME + cpu.t;
     }
 
     @Override
     public void write(int addr, int v) {
         if (addr < 0x4000) return;
-        if (trace.enabled) trace.lastWrite[addr] = trace.now;
+        if (trace.enabled) trace.lastWrite[addr] = (long) frameCount * T_FRAME + cpu.t;
         mem[addr] = (byte) v;
     }
 
@@ -299,6 +304,9 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
 
     /** instructions executed since power-on (the unit of single-stepping) */
     public long instr;
+    /** address and start time of the last executed instruction (for single-stepping display) */
+    public volatile int lastInstrPc = -1;
+    public volatile long lastInstrStart;
     /** T-states executed by the last {@link #run} call */
     public long lastRunT;
 
@@ -360,6 +368,7 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
     private long stepOne() {
         if (!frameOpen) beginFrame();
         long t0 = cpu.t;
+        lastInstrStart = time();
         if (cpu.t < 32) cpu.interrupt();
         int pc = cpu.pc;
         boolean trapped = false;
@@ -369,6 +378,7 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         } else if (pc >= 0x05E3 && pc < 0x0605) {
             wasLoading = true; // inside LD-EDGE: waiting for the tape
         }
+        lastInstrPc = cpu.pc;
         if (!trapped) {
             long t1 = cpu.t;
             cpu.step();

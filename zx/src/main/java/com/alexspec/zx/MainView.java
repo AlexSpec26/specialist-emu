@@ -584,11 +584,14 @@ final class MainView extends View {
         for (int k = 0; k < len[0]; k++) hex.append(String.format("%02X", machine.rawRead(z.pc + k)));
         long t = z.t;
         int line = (int) (t / Spectrum48.T_LINE);
-        String l1 = String.format(java.util.Locale.US, "%04X  %-8s %s", z.pc, hex, ins);
+        String l1 = String.format(java.util.Locale.US, "→ %04X  %-8s %s", z.pc, hex, ins);
+        int lp = machine.lastInstrPc;
+        String l0 = lp < 0 ? "" : String.format(java.util.Locale.US, "✓ %04X  %s", lp,
+                com.alexspec.zx.core.Z80Dis.dis(machine, lp, null));
         String l2 = String.format(java.util.Locale.US, "AF %04X BC %04X DE %04X HL %04X", z.af(), z.bc(), z.de(), z.hl());
         String l3 = String.format(java.util.Locale.US, "IX %04X IY %04X SP %04X IM%d %s", z.ix, z.iy, z.sp, z.im, z.iff1 ? "EI" : "DI");
         String l4 = String.format(java.util.Locale.US, "кадр %d, такт %d (строка %d, %d)", machine.frames(), t, line, t % Spectrum48.T_LINE);
-        String[] lines = {l1, l2, l3, l4};
+        String[] lines = l0.isEmpty() ? new String[]{l1, l2, l3, l4} : new String[]{l0, l1, l2, l3, l4};
         android.graphics.Typeface old = text.getTypeface();
         text.setTypeface(android.graphics.Typeface.MONOSPACE);
         text.setTextAlign(Paint.Align.LEFT);
@@ -600,7 +603,8 @@ final class MainView extends View {
         fill.setColor(0xD0101018);
         c.drawRoundRect(bx, by, bx + maxW + 2 * pad, by + lh * lines.length + pad, 6 * dp, 6 * dp, fill);
         for (int i = 0; i < lines.length; i++) {
-            text.setColor(i == 0 ? 0xFFFFFF60 : 0xFFD0D0DA);
+            boolean next = lines[i].startsWith("→"), done = lines[i].startsWith("✓");
+            text.setColor(next ? 0xFFFFFF60 : done ? 0xFF20E8FF : 0xFFD0D0DA);
             c.drawText(lines[i], bx + pad, by + pad + (i + 0.8f) * lh, text);
         }
         text.setTextAlign(Paint.Align.CENTER);

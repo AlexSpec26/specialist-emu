@@ -344,6 +344,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
             machine.releaseAllKeys();
         }
         emu.setUserPaused(p);
+        if (!p) emu.stepping = false;
         view.paused = tapPaused || view.isPicking();
         view.invalidate();
     }
@@ -357,6 +358,8 @@ public final class EmuActivity extends Activity implements MainView.Host {
 
     @Override
     public void onStep(int kind) {
+        // single instruction: the map shows only that instruction; a second: the usual fading flashes
+        emu.stepping = kind == 1 || kind == 2;
         emu.postKeepScreen(() -> {
             boolean ok = true;
             switch (kind) {
@@ -806,11 +809,14 @@ public final class EmuActivity extends Activity implements MainView.Host {
                         + "синим на цифрах — функция с CAPS (CAPS+0 — удалить, CAPS+5…8 — стрелки).\n\n"
                         + "Пауза: нажмите на экран. В паузе внизу экрана кнопки: на секунду и на одну команду "
                         + "назад и вперёд; 4 секунды видны луч и текущая команда процессора с регистрами. "
-                        + "Назад можно уйти на 10 секунд. Пока открыто меню, эмуляция тоже стоит.\n\n"
+                        + "Назад можно уйти на 10 секунд. При шагах по одной команде на карте памяти светится "
+                        + "только эта команда: её байты голубым и ячейки, которые она прочитала или записала. "
+                        + "Пока открыто меню, эмуляция тоже стоит.\n\n"
                         + "Сохранения: у каждой игры своё. Значок 💾 в списках — у игры есть сохранение.\n\n"
                         + "Скорость: от ×4 до 1 такта в секунду, каждый шаг ползунка — вдвое.\n\n"
                         + "Визуализация памяти: карта всех 64 КБ под экраном, байты вспыхивают при "
-                        + "чтении, записи и исполнении; тап по карте — что это за адрес; есть экскурсия.\n\n"
+                        + "чтении, записи и исполнении; вспышка длится столько же реального времени при любой "
+                        + "скорости, но не меньше одной команды; тап по карте — что это за адрес; есть экскурсия.\n\n"
                         + "Файлы: Android/data/com.alexspec.zx/files (папки programs и states), их видно "
                         + "с компьютера по USB.\n\n"
                         + "Физическая клавиатура: Shift — CAPS SHIFT, Alt/Ctrl — SYMBOL SHIFT, "
