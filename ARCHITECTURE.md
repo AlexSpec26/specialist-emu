@@ -31,7 +31,7 @@ tools/      настольные тесты (Java): CpuTest, MachineTest, ShellC
 | ROM | `shell/**`, `tools/ShellCompat.java` | `rom-build-N` | `shell-N.rom` |
 | FLIP | только вручную (workflow_dispatch) | `flipper-N` | `.fap` |
 
-Подпись APK: `app/emu.keystore` (alias `emu`), см. ADR-011.
+Подпись APK: в CI из секретов `SIGNING_*` (ADR-014); пока их нет — `app/emu.keystore`. Агенты ключ не используют.
 Диагностика CI из облачной сессии: логи заданий закрыты прокси, но аннотации доступны:
 `gh api repos/AlexSpec26/specialist-emu/check-runs/<job>/annotations`. Релиз — по тегу:
 `gh api repos/AlexSpec26/specialist-emu/releases/tags/<tag>`.

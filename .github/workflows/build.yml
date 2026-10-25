@@ -34,6 +34,24 @@ jobs:
           grep -q "CPU IS OPERATIONAL" /tmp/cpu.log
           grep -q "CPU TESTS OK" /tmp/cpu.log
 
+      - name: Signing key from secrets (if set)
+        env:
+          KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+          STORE_PW: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          KEY_PW: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "SIGNING_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+            echo "SIGNING_STORE_PASSWORD=$STORE_PW" >> "$GITHUB_ENV"
+            echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "SIGNING_KEY_PASSWORD=$KEY_PW" >> "$GITHUB_ENV"
+            echo "Using the signing key from GitHub secrets"
+          else
+            echo "No signing secrets yet: using the old key from the repository"
+          fi
+
       - name: Build APK
         run: gradle --no-daemon :app:assembleRelease
 

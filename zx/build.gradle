@@ -16,12 +16,15 @@ android {
         versionName "1.0.${runNumber}"
     }
 
+    // Release signing key (ADR-011/ADR-014): in CI it comes from GitHub secrets via environment
+    // variables; without them (until the secrets exist) the old key from the repository is used.
+    def ksPath = System.getenv("SIGNING_KEYSTORE")
     signingConfigs {
         emu {
-            storeFile file('../app/emu.keystore')
-            storePassword 'specialist'
-            keyAlias 'emu'
-            keyPassword 'specialist'
+            storeFile ksPath ? file(ksPath) : file('../app/emu.keystore')
+            storePassword System.getenv("SIGNING_STORE_PASSWORD") ?: 'specialist'
+            keyAlias System.getenv("SIGNING_KEY_ALIAS") ?: 'emu'
+            keyPassword System.getenv("SIGNING_KEY_PASSWORD") ?: 'specialist'
         }
     }
 
