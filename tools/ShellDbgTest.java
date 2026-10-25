@@ -54,7 +54,7 @@ public class ShellDbgTest {
         for (int i = 0; i < loop.length; i++) m.write(0x120 + i, loop[i]);
         m.write(0x38, 0x11); m.write(0x39, 0x22); m.write(0x3A, 0x33);
         key("F1");
-        key("3");
+        key("4");
         run(100);
         shot("dbg_start");
 

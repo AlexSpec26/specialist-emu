@@ -39,11 +39,13 @@ M_GETTOP:
         ; read ROM bytes as data (Piton 3 reads CD21-CD28)
         INCLUDE "overview.asm"
         INCLUDE "memdesc.asm"
+        INCLUDE "gap_cce6.asm"
         ASSERT $ <= 0CD21h, "code runs into CD21 (Monitor-2 bytes read by games)"
         ORG 0CD21h
         ; Piton 3 reads CD21-CD28 of the ROM as data: Monitor-2's bytes stay there
         INCBIN "../base/spec_m2.rom", 0D21h, 8
         INCLUDE "scroll.asm"
+        INCLUDE "gap_cdcc.asm"
         ASSERT $ <= 0CE1Dh, "code runs into CE1D (fixed Monitor-2 routines)"
         ORG 0CE1Dh
 ; C818: print string (HL) up to 00
@@ -55,6 +57,7 @@ M_PUTS: MOV A,M
         INX H
         JMP M_PUTS
 
+        INCLUDE "gap_ce29.asm"
         ASSERT $ <= 0CE5Ch
         ORG 0CE5Ch
 ; C812 / C81B: code of the pressed key or FF, without waiting (uses the base scanner)

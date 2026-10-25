@@ -59,9 +59,9 @@ public class ShellTiming {
         long ov = call("REDRAW");
         report("REDRAW Обзор", ov);
         save(out, "overview");
-        m.write(sym.get("CURAPP"), 3);
+        m.write(sym.get("CURAPP"), 2);
         long st = call("REDRAW");
-        report("REDRAW программа 3", st);
+        report("REDRAW Магнитофон", st);
         save(out, "stub");
         if (sym.containsKey("MEM_DRAW")) {
             m.write(sym.get("CURAPP"), 1);
@@ -75,8 +75,8 @@ public class ShellTiming {
             report("Память: ↓ с прокруткой", call("MEM_KEY"));
         }
         if (sym.containsKey("DBG_DRAW")) {
-            m.write(sym.get("CURAPP"), 2);
-            report("REDRAW Отладка (каждый шаг)", call("REDRAW"));
+            m.write(sym.get("CURAPP"), 3);
+            report("REDRAW Отладка (каждая остановка)", call("REDRAW"));
             save(out, "debugger");
         }
         m.write(sym.get("CURAPP"), 0);

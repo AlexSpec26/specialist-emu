@@ -106,6 +106,10 @@ public class ShellMemTest {
         run(40);
         expect("удаление", 0x1000, 0xDE, 0xDE, 0xBE, 0xEF, 0xEF, 0x00, 0x00, 0x00, 0x00);
         shot("mem_shift");
+        // F7: fill
+        type("F7", "1010", "ВК", "1013", "ВК", "5A", "ВК");
+        run(40);
+        expect("заполнение", 0x100F, 0x00, 0x5A, 0x5A, 0x5A, 0x5A, 0x00);
         type("F2", "9000", "ВК");
         run(30);
         shot("mem_screen");

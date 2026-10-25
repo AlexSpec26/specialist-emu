@@ -1,9 +1,6 @@
 ; =====================================================================================
-;  «Отладка» (ROM-003) — отложена владельцем 2026-10-25 («ладно, откладываем отладчик»):
-;  не хватает ПЗУ. Файл НЕ подключён в main.asm. Чтобы вернуть: INCLUDE "debugger.asm" в
-;  apps.asm, строку APPTAB  DW N_DEBUG, DBG_DRAW, DBG_KEY  и N_DEBUG: TEXT "Отладка",0,
-;  вызов DBG_INIT из APPS_INIT, NAPPS + 1, CURAPP в DBG_SAVE = номер программы, тест
-;  tools/ShellDbgTest.java обратно в CI. Работал и проходил тест в rom-build-5.
+;  «Отладка» (ROM-003). Была отложена (rom-build-6..9), возвращена 2026-10-25 вместо
+;  «Монитора»: «попробуй для начала выкинуть монитор и вернуть отладчик».
 ; =====================================================================================
 
 DBG_INIT:
@@ -33,52 +30,36 @@ DBG_INIT:
 ; RST 7 (FF) on the next command and on the branch target, with JMP DBG_TRAP at 0038-003A
 ; only for that one command. All changed bytes are saved and put back at the stop. Only for
 ; code in ОЗУ (0000-BFFF).
-R_AF    EQU APPVARS+18h         ; registers of the program, in this order
-R_BC    EQU APPVARS+1Ah
-R_DE    EQU APPVARS+1Ch
-R_HL    EQU APPVARS+1Eh
-R_SP    EQU APPVARS+20h
-R_PC    EQU APPVARS+22h
-DSEL    EQU APPVARS+24h         ; selected register 0..5
-DMODE   EQU APPVARS+25h         ; 1 = after this stop put the breakpoints and run on
-DEND    EQU APPVARS+26h         ; 1 = the program returned into the debugger
-DBP     EQU APPVARS+27h         ; 4 breakpoints, FFFF = none
-DPLN    EQU APPVARS+2Fh         ; planted traps
-DPL     EQU APPVARS+30h         ; 4 x (address, 3 saved bytes)
-DVEC    EQU APPVARS+44h         ; saved 0038-003A
-DN1     EQU APPVARS+47h         ; step: next address and branch target
-DN2     EQU APPVARS+49h
-DVON    EQU APPVARS+4Bh         ; 1 = the vector at 0038 is ours
-DKIND   EQU APPVARS+4Ch         ; what DBG_PLANT writes: 0 RST 7, 1 CALL DBG_TRAPC
+R_AF    EQU APPVARS+1Ah         ; registers of the program, in this order
+R_BC    EQU APPVARS+1Ch
+R_DE    EQU APPVARS+1Eh
+R_HL    EQU APPVARS+20h
+R_SP    EQU APPVARS+22h
+R_PC    EQU APPVARS+24h
+DSEL    EQU APPVARS+26h         ; selected register 0..5
+DMODE   EQU APPVARS+27h         ; 1 = after this stop put the breakpoints and run on
+DEND    EQU APPVARS+28h         ; 1 = the program returned into the debugger
+DBP     EQU APPVARS+29h         ; 4 breakpoints, FFFF = none
+DPLN    EQU APPVARS+31h         ; planted traps
+DPL     EQU APPVARS+32h         ; 4 x (address, 3 saved bytes)
+DVEC    EQU APPVARS+46h         ; saved 0038-003A
+DN1     EQU APPVARS+49h         ; step: next address and branch target
+DN2     EQU APPVARS+4Bh
+DVON    EQU APPVARS+4Dh         ; 1 = the vector at 0038 is ours
+DKIND   EQU APPVARS+4Eh         ; what DBG_PLANT writes: 0 RST 7, 1 CALL DBG_TRAPC
 DSTACK  EQU 8DFEh               ; program stack after F2; holds the return into the debugger
 
 DBG_DRAW:
-        MVI B,0
-        MVI C,1
-        MVI D,63
-        MVI E,30
-        MVI A,1
-        CALL FRAME
-        MVI B,2
-        MVI C,1
-        CALL PRINTAT
-        TEXT " Отладка ",0
-        MVI B,36
-        MVI C,4
-        CALL PRINTAT
+        CALL PRINTL
+        DB 36,4
         TEXT "Стек",0
-        MVI B,4
-        MVI C,4
-        CALL PRINTAT
+        DB 4,4
         TEXT "Код от PC (",01h,"►",02h," PC, * точка)",0
-        MVI B,4
-        MVI C,24
-        CALL PRINTAT
+        DB 4,24
         TEXT "◄► регистр  ВК изменить  F2 PC=адрес  F8 точка останова",0
-        MVI B,4
-        MVI C,25
-        CALL PRINTAT
+        DB 4,25
         TEXT "F5 шаг  F6 шаг без захода в CALL  F9 пуск до точки",0
+        DB 0FFh
         CALL DBG_REGS
         CALL DBG_CODE
         CALL DBG_SIDE
@@ -610,7 +591,6 @@ DBG_REFUSE:
         XRA A
         STA DMODE
         JMP MEM_MSG
-S_G_VEC: TEXT "команда у адреса 0038 (там вектор шага): шаг нельзя",0
 S_G_TOROM: TEXT "переход в ПЗУ: шаг нельзя, поставьте точку и F9",0
 S_G_PCROM: TEXT "PC в ПЗУ: шаг нельзя",0
 
@@ -643,128 +623,6 @@ DBG_PLANTBP:
         POP D
         DCR B
         JNZ .l
-        RET
-
-; JMP DBG_TRAP at 0038 (the RST 7 vector), old bytes saved
-DBG_VEC:
-        MVI A,1
-        STA DVON
-        LXI H,0038h
-        LXI D,DVEC
-        MVI B,3
-.s:     MOV A,M
-        STAX D
-        INX H
-        INX D
-        DCR B
-        JNZ .s
-        LXI H,DBG_TRAP
-        SHLD 0039h
-        MVI A,0C3h
-        STA 0038h
-        RET
-
-; trap at HL (only ОЗУ, not twice, FFFF = none): RST 7 or CALL DBG_TRAPC (DKIND); 3 bytes
-; are saved. Keeps B.
-DBG_PLANT:
-        MOV A,H
-        CPI 0C0h
-        RNC
-        XCHG
-        LXI H,DPLN
-        MOV C,M
-        INX H
-        INR C
-.c:     DCR C
-        JZ .new
-        MOV A,M
-        CMP E
-        JNZ .c2
-        INX H
-        MOV A,M
-        DCX H
-        CMP D
-        RZ
-.c2:    INX H
-        INX H
-        INX H
-        INX H
-        INX H
-        JMP .c
-.new:   MOV M,E
-        INX H
-        MOV M,D
-        INX H
-        MVI C,3
-.s:     LDAX D
-        MOV M,A
-        INX H
-        INX D
-        DCR C
-        JNZ .s
-        DCX D
-        DCX D
-        DCX D
-        LDA DKIND
-        ORA A
-        MVI A,0FFh
-        JZ .w
-        MVI A,0CDh
-        STAX D
-        INX D
-        MVI A,LOW(DBG_TRAPC)
-        STAX D
-        INX D
-        MVI A,HIGH(DBG_TRAPC)
-.w:     STAX D
-        LXI H,DPLN
-        INR M
-        RET
-
-; put back the planted bytes (last first) and the vector
-DBG_UNPLANT:
-        LDA DPLN
-        ORA A
-        JZ .v
-        MOV C,A
-        ADD A
-        ADD A
-        ADD C
-        MOV E,A
-        MVI D,0
-        LXI H,DPL-5
-        DAD D                   ; last entry
-.l:     MOV E,M
-        INX H
-        MOV D,M
-        INX H
-        MVI B,3
-.r:     MOV A,M
-        STAX D
-        INX H
-        INX D
-        DCR B
-        JNZ .r
-        LXI D,-10
-        DAD D
-        DCR C
-        JNZ .l
-        XRA A
-        STA DPLN
-.v:     LDA DVON
-        ORA A
-        RZ
-        XRA A
-        STA DVON
-        LXI H,DVEC
-        LXI D,0038h
-        MVI B,3
-.w:     MOV A,M
-        STAX D
-        INX H
-        INX D
-        DCR B
-        JNZ .w
         RET
 
 ; start the program with its registers
@@ -818,10 +676,10 @@ DBG_SAVE:
         STA DMODE
         CALL DBG_PLANTBP
         JMP DBG_GO
-.stop:  MVI A,2                 ; show the debugger
+.stop:  MVI A,3                 ; show the debugger (program 3)
         STA CURAPP
         LDA RUNMASK
-        ORI 4
+        ORI 8
         STA RUNMASK
         JMP MAIN
 

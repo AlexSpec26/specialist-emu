@@ -117,6 +117,7 @@ GLYPHS:
         ; and E0-FF at code*8)
         ASSERT $ == 0EDE8h
         INCLUDE "hexin.asm"
+        INCLUDE "gap_eea1.asm"
         ASSERT $ <= 0EF00h, "code runs into the pseudographics glyphs at EF00"
         ORG 0EF00h
         INCLUDE "glyphs_hi.inc"         ; E0-FF

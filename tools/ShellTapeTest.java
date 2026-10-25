@@ -67,7 +67,7 @@ public class ShellTapeTest {
 
         // 1. the shell writes 2000-22FF
         Tape t = record(m);
-        type("F3", "2000", "ВК", "22FF", "ВК", "ВК");
+        type("F3", "2000", "ВК", "22FF", "ВК", "ВК", "ВК");   // no name, then start
         run(1500);
         m.tapeOutListener = null;
         System.out.println("recorded edges: " + t.edges.size());
@@ -113,11 +113,76 @@ public class ShellTapeTest {
         if (!ok) { System.out.println("FAIL Монитор-2 не прочитал запись оболочки"); fails++; }
         else System.out.println("ok Монитор-2 читает запись оболочки");
 
+        // 6. named files: the shell writes "TEST" -> Monitor-2's I reads it (any name: 8FC1 = 0)
+        for (int i = 0; i < 0x40; i++) m.write(0x2400 + i, data[i]);
+        Tape t4 = record(m);
+        type("F3", "2400", "ВК", "243F", "ВК", "TEST", "ВК", "ВК");
+        run(600);
+        m.tapeOutListener = null;
+        Specialist r2 = new Specialist();
+        r2.loadRom(m2);
+        r2.hardReset();
+        for (int i = 0; i < 60; i++) r2.runFrame(au);
+        r2.write(0x8FC1, 0);
+        t4.play(r2);
+        callAt(r2, 0xC9CB, 0, 0, 0);
+        StringBuilder nm = new StringBuilder();
+        for (int i = 0; i < 4; i++) nm.append((char) r2.peek(0x8FB0 + i));
+        boolean ok4 = nm.toString().equals("TEST");
+        for (int i = 0; i < 0x40; i++) if (r2.peek(0x2400 + i) != data[i]) ok4 = false;
+        if (!ok4) { System.out.println("FAIL Монитор-2 (I) не прочитал именованный файл: " + nm); fails++; }
+        else System.out.println("ok Монитор-2 (I) читает файл оболочки с именем " + nm);
+
+        // 7. Monitor-2's O format (name header + block) -> the shell reads data and name
+        Specialist w2 = new Specialist();
+        w2.loadRom(m2);
+        w2.hardReset();
+        for (int i = 0; i < 60; i++) w2.runFrame(au);
+        int[] d3 = new int[0x80];
+        int sum = 0;
+        for (int i = 0; i < d3.length; i++) { d3[i] = rnd.nextInt(256); w2.write(0x3400 + i, d3[i]); }
+        // checksum as C82A: low = sum of bytes; high = sum with carries, except for the last byte
+        int lo = 0, hi = 0;
+        for (int i = 0; i < d3.length; i++) {
+            lo += d3[i];
+            if (i < d3.length - 1) { hi += d3[i] + (lo >> 8); }
+            lo &= 0xFF; hi &= 0xFF;
+        }
+        w2.write(0x8F93, lo); w2.write(0x8F94, hi);
+        String name = "ABC";
+        for (int i = 0; i < name.length(); i++) w2.write(0x8FB0 + i, name.charAt(i));
+        w2.write(0x8FB0 + name.length(), 0);
+        Tape t5 = new Tape();
+        w2.tapeOutListener = (cycle, level) -> t5.edges.add(new long[]{cycle, level ? 1 : 0});
+        // enter after the name prompt (CAB0): the stack holds end (DE) and start (HL), then our return
+        int ret = 0x0100;
+        w2.cpu.sp = 0x7F00 - 6;
+        int sp = w2.cpu.sp;
+        w2.write(sp, 0x7F); w2.write(sp + 1, 0x34);      // DE = 347F
+        w2.write(sp + 2, 0x00); w2.write(sp + 3, 0x34);  // HL = 3400
+        w2.write(sp + 4, ret & 0xFF); w2.write(sp + 5, ret >> 8);
+        w2.cpu.c = 0;
+        w2.cpu.pc = 0xCAB0;
+        long end2 = w2.getCycleCount() + 400_000_000L;
+        while (w2.cpu.pc != ret && w2.getCycleCount() < end2) w2.runCycles(1);
+        w2.tapeOutListener = null;
+        key("F2");
+        t5.play(m);
+        run(600);
+        m.tapeInput = null;
+        expect("чтение файла Монитора-2 с именем", 0x3400, d3);
+        StringBuilder nm2 = new StringBuilder();
+        for (int i = 0; i < 3; i++) nm2.append((char) m.peek(sym.get("TNAME") + i));
+        if (!nm2.toString().equals("ABC")) { System.out.println("FAIL имя: " + nm2); fails++; }
+        else System.out.println("ok имя файла " + nm2);
+        expectByte("сумма верна (O)", sym.get("TSTAT"), 1);
+        shot("tape_named");
+
         // 5. F5 runs the loaded block; its RET comes back into the shell, state kept (warm start)
         int[] prog = {0x3E, 0x77, 0x32, 0x00, 0x21, 0xC9};      // MVI A,77 / STA 2100 / RET
         for (int i = 0; i < prog.length; i++) m.write(0x2000 + i, prog[i]);
         Tape t3 = record(m);
-        type("F3", "2000", "ВК", "2005", "ВК", "ВК");
+        type("F3", "2000", "ВК", "2005", "ВК", "ВК", "ВК");
         run(400);
         m.tapeOutListener = null;
         for (int i = 0; i < prog.length; i++) m.write(0x2000 + i, 0);
