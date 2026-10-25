@@ -22,6 +22,7 @@ jobs:
 
       - name: Assemble
         run: |
+          mkdir -p shell/build
           cd shell/src
           python3 ../tools/asm80.py main.asm -o ../build/shell.rom --base C000 --size 3000 -l ../build/shell.lst -s ../build/shell.sym
 
