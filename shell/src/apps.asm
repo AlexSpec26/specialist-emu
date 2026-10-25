@@ -20,10 +20,12 @@ APPS_INIT:
         SHLD MCUR
         SHLD MTOP
         XRA A
-        STA MEDIT
+        STA MMODE
         STA MPATN
         DCR A
         STA MNIB
+        LXI H,8DFFh
+        SHLD MEND
         RET
 
 ; HL = entry of program A in APPTAB
@@ -79,12 +81,13 @@ NOKEY:  RET
 ; hex, binary, decimal; row 22: what this address is. Row 27: prompts and messages.
 MCUR    EQU APPVARS+0           ; 2: cursor address
 MTOP    EQU APPVARS+2           ; 2: address of the first line shown
-MEDIT   EQU APPVARS+4           ; 1 = editing
+MMODE   EQU APPVARS+4           ; typing goes in as: 0 hex digits, 1 characters
 MNIB    EQU APPVARS+5           ; first hex digit typed while editing, FF = none
 MPATN   EQU APPVARS+6           ; search pattern length (0 = none)
 MPAT    EQU APPVARS+7           ; 8 bytes: search pattern
 MBROW   EQU APPVARS+0Fh         ; 2: line shown in the picture
 MCOPY   EQU APPVARS+11h         ; 6: transfer: from, to/length, destination
+MEND    EQU APPVARS+24h         ; 2: insert/delete move the bytes up to here
 MROW0   EQU 4                   ; first data row
 MCOLS   EQU 33                  ; screen bytes to scroll (text columns 0..43)
 MMSG    EQU 27                  ; message row
@@ -117,11 +120,8 @@ MEM_DRAW:
         MVI B,4
         MVI C,24
         CALL PRINTAT
-        TEXT "◄►▲▼ курсор    НР+▲▼ страница    ВК правка (цифры 0-9 A-F)",0
-        MVI B,4
-        MVI C,25
-        CALL PRINTAT
-        TEXT "F2 адрес       F3 поиск          F4 перенос блока",0
+        TEXT "◄►▲▼ НР+▲▼ курсор  F5 hex/текст  ЗБ удалить  СТР вставить",0
+        CALL MEM_HELP2
         CALL MEM_ROWS
         CALL MEM_NOPIC
         JMP MEM_SHOW
@@ -136,6 +136,8 @@ MEM_NOPIC:
 ; all 16 data lines
 MEM_ROWS:
         XRA A
+; data lines from line A down
+MEM_ROWSFROM:
 .l:     PUSH PSW
         CALL MEM_ROW
         POP PSW
@@ -235,9 +237,15 @@ MEM_POS:
 
 ; draw the cursor cell: A = 3Fh marked, 0 plain
 MEM_MARK:
-        STA INV
+        STA TMP+4
         CALL MEM_POS
         JC .x
+        LDA MMODE               ; hex cell marked in hex mode
+        ORA A
+        LDA TMP+4
+        JZ .h
+        XRA A
+.h:     STA INV
         MOV A,D
         ADD A
         ADD D
@@ -255,7 +263,13 @@ MEM_MARK:
         JMP .txt
 .full:  MOV A,M
         CALL PHEX8
-.txt:   MOV A,D
+.txt:   LDA MMODE               ; character cell marked in text mode
+        ORA A
+        LDA TMP+4
+        JNZ .t
+        XRA A
+.t:     STA INV
+        MOV A,D
         ADI 33
         MOV B,A
         CALL GOTOXY
@@ -311,14 +325,15 @@ MEM_INFO:
         CALL BDEC
         MVI C,48
         CALL BPADTO
-        LDA MEDIT
-        ORA A
-        JZ .ne
         PUSH D
-        LXI D,S_EDIT
-        CALL BSTR
+        LXI D,S_HEX
+        LDA MMODE
+        ORA A
+        JZ .md
+        LXI D,S_TXT
+.md:    CALL BSTR
         POP D
-.ne:    MVI C,63
+        MVI C,65                ; + the two inverse codes
         CALL BPADTO
         MVI B,0
         MVI C,21
@@ -340,7 +355,8 @@ MEM_INFO:
         MVI B,0
         MVI C,22
         JMP BPRINT
-S_EDIT: TEXT 01h," ПРАВКА ",02h,0
+S_HEX:  TEXT 01h," ввод: HEX ",02h,0
+S_TXT:  TEXT 01h," ввод: ТЕКСТ ",02h,0
 
 ; DE = address -> its description at HL
 MEM_DESC:
@@ -548,13 +564,7 @@ MEM_BITS:
 
 ; ---------------------------------------------------------------- memory: keys
 MEM_KEY:
-        LDA MEDIT
-        ORA A
-        JZ .nav
         LDA TMP
-        CALL HEXVAL
-        JNC MEM_DIGIT
-.nav:   LDA TMP
         LXI D,1
         CPI 18h                 ; →
         JZ MEM_MOVE
@@ -565,15 +575,38 @@ MEM_KEY:
         JZ .up
         CPI 1Ah                 ; ↓
         JZ .dn
-        CPI 0Dh                 ; ВК
-        JZ .edit
         CPI 0C2h                ; F2
         JZ MEM_GO
         CPI 0C3h                ; F3
         JZ MEM_FIND
         CPI 0C4h                ; F4
         JZ MEM_COPY
+        CPI 0C5h                ; F5
+        JZ .mode
+        CPI 0C6h                ; F6
+        JZ MEM_BOUND
+        CPI 1Eh                 ; ЗБ
+        JZ MEM_DEL
+        CPI 1Fh                 ; СТР
+        JZ MEM_INS
+        MOV B,A
+        LDA MMODE
+        ORA A
+        MOV A,B
+        JNZ .text
+        CALL HEXVAL             ; hex: digits are typed straight in
+        JNC MEM_DIGIT
         RET
+.text:  CPI 0Dh                 ; text: ВК, and every character (not F keys C0-DF)
+        JZ .put
+        CPI 20h
+        RC
+        CPI 0C0h
+        JC .put
+        CPI 0E0h
+        RC
+.put:   MOV C,A
+        JMP MEM_PUT
 .up:    LXI D,-8
         LDA SHIFTK
         ORA A
@@ -586,13 +619,119 @@ MEM_KEY:
         JZ MEM_MOVE
         LXI D,128
         JMP MEM_MOVE
-.edit:  LDA MEDIT
+.mode:  XRA A
+        CALL MEM_MARK
+        LDA MMODE
         XRI 1
-        STA MEDIT
+        STA MMODE
         MVI A,0FFh
         STA MNIB
-        CALL MEM_CLRMSG
         JMP MEM_SHOW
+
+; F6: insert/delete move bytes up to this address (ОЗУ only)
+MEM_BOUND:
+        LXI H,S_M_BOUND
+        CALL MEM_ASK
+        JC MEM_CLRMSG
+        MOV A,H
+        CPI 0C0h
+        JNC .bad
+        SHLD MEND
+        CALL MEM_CLRMSG
+        JMP MEM_HELP2
+.bad:   LXI H,S_M_BAD
+        JMP MEM_MSG
+S_M_BOUND: TEXT "граница сдвига: ",0
+
+; row 25: commands and the bound
+MEM_HELP2:
+        LXI H,LBUF
+        LXI D,S_HELP2
+        CALL BSTR
+        PUSH H
+        LHLD MEND
+        XCHG
+        POP H
+        CALL BHEX16
+        MVI C,58
+        CALL BPADTO
+        MVI B,4
+        MVI C,25
+        JMP BPRINT
+S_HELP2: TEXT "F2 адрес  F3 поиск  F4 перенос  F6 граница сдвига ",0
+
+; ЗБ: delete the byte under the cursor; the bytes after it up to the bound move back
+MEM_DEL:
+        CALL MEM_SPAN
+        RC
+        JZ .last
+        MOV D,H
+        MOV E,L
+        INX H
+.f:     MOV A,M
+        STAX D
+        INX H
+        INX D
+        DCX B
+        MOV A,B
+        ORA C
+        JNZ .f
+        XCHG
+.last:  MVI M,0
+        JMP MEM_SHIFTED
+
+; СТР: insert 00 under the cursor; the bytes up to the bound move on, the last one is lost
+MEM_INS:
+        CALL MEM_SPAN
+        RC
+        JZ .last
+        LHLD MEND
+        MOV D,H
+        MOV E,L
+        DCX H
+.b:     MOV A,M
+        STAX D
+        DCX H
+        DCX D
+        DCX B
+        MOV A,B
+        ORA C
+        JNZ .b
+.last:  LHLD MCUR
+        MVI M,0
+MEM_SHIFTED:
+        MVI A,0FFh
+        STA MNIB
+        CALL MEM_POS
+        MOV A,C
+        SUI MROW0
+        CALL MEM_ROWSFROM
+        CALL MEM_NOPIC
+        JMP MEM_SHOW
+
+; HL = cursor, BC = bound - cursor, Z if 0; carry (message shown) if not possible
+MEM_SPAN:
+        LHLD MEND
+        XCHG
+        LHLD MCUR
+        MOV A,E
+        SUB L
+        MOV C,A
+        MOV A,D
+        SBB H
+        MOV B,A
+        JC .far
+        MOV A,H
+        CPI 0C0h
+        JNC .far
+        MOV A,B
+        ORA C
+        RET
+.far:   LXI H,S_M_FAR
+        CALL MEM_MSG
+        STC
+        RET
+S_M_FAR: TEXT "курсор за границей сдвига (F6) или в ПЗУ",0
 
 ; move the cursor by DE; scroll one line if it just leaves the window, else jump
 MEM_MOVE:
@@ -680,6 +819,8 @@ MEM_DIGIT:
         MOV C,A
         MVI A,0FFh
         STA MNIB
+; write C under the cursor and step on
+MEM_PUT:
         LHLD MCUR
         MOV A,H
         CPI 0C0h

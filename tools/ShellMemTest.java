@@ -41,7 +41,7 @@ public class ShellMemTest {
 
         type("F2", "8000", "ВК");
         run(30);
-        type("ВК", "1", "2", "A", "B", "ВК");
+        type("1", "2", "A", "B");       // hex digits go straight in
         run(20);
         expect("правка 8000", 0x8000, 0x12, 0xAB);
         expectCur(0x8002);
@@ -60,7 +60,7 @@ public class ShellMemTest {
 
         type("F2", "1000", "ВК");
         run(40);                // the window is redrawn: keys pressed meanwhile are lost
-        type("ВК", "DEADBEEF", "ВК");
+        type("DEADBEEF");
         run(30);
         expect("правка 1000", 0x1000, 0xDE, 0xAD, 0xBE, 0xEF);
         type("F2", "0000", "ВК");
@@ -83,10 +83,29 @@ public class ShellMemTest {
         run(30);
         shot("mem_copy");
         // ПЗУ cannot be edited
-        type("F2", "C000", "ВК", "ВК", "0", "0", "ВК");
+        type("F2", "C000", "ВК");
+        run(40);
+        type("0", "0");
         run(30);
         if (m.peek(0xC000) == 0) { System.out.println("FAIL: ROM changed"); fails++; }
         shot("mem_rom");
+        // text mode: characters go in as their codes (Latin lower case: a1..)
+        type("F2", "1100", "ВК");
+        run(40);
+        type("F5", "HI", "F5");
+        expect("текст", 0x1100, 0xA8, 0xA9);
+        // insert / delete up to the bound 1007 (1000..: DE DE AD BE EF EF 00 00)
+        type("F6", "1007", "ВК", "F2", "1002", "ВК");
+        run(40);
+        key("СТР");
+        run(40);
+        expect("вставка", 0x1000, 0xDE, 0xDE, 0x00, 0xAD, 0xBE, 0xEF, 0xEF, 0x00, 0x00);
+        key("ЗБ");
+        run(40);
+        key("ЗБ");
+        run(40);
+        expect("удаление", 0x1000, 0xDE, 0xDE, 0xBE, 0xEF, 0xEF, 0x00, 0x00, 0x00, 0x00);
+        shot("mem_shift");
         type("F2", "9000", "ВК");
         run(30);
         shot("mem_screen");
@@ -115,7 +134,7 @@ public class ShellMemTest {
 
     static void type(String... keys) {
         for (String k : keys) {
-            if (k.matches("F([1-9]|1[01])|ВК|↓|↑")) key(k);          // a named key
+            if (k.matches("F([1-9]|1[01])|ВК|↓|↑|ЗБ|СТР")) key(k);          // a named key
             else for (char ch : k.toCharArray()) key(String.valueOf(ch));
         }
     }

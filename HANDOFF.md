@@ -4,7 +4,7 @@
 - Branch: main (короткие ветки на задачу пока не заводились — см. OPS-002)
 - Last pushed commit: см. `git log -1` (коммит «ROM-001 ...»)
 - Open PR: нет
-- Active backlog IDs: ROM-012, затем ROM-007 «Монитор»
+- Active backlog IDs: ROM-007 «Монитор»
 - User-approved goal for this session: ядро и совместимость (сделано), память проекта (сделано),
   ключ подписи в секретах (OPS-001, сделано), «давай» → ROM-001, ROM-002 (сделаны)
 
@@ -37,8 +37,7 @@
 - Принятые: ADR-002…015.
 
 ## Exact next steps (ordered)
-1. ROM-012: правка в «Памяти» (hex/текст, вставка/удаление).
-2. ROM-007 «Монитор».
+1. ROM-007 «Монитор».
 3. Перед каждым коммитом ROM: собрать, `ShellSmoke`, `ShellTiming`, по возможности
    `ShellCompat` (игры — см. ARCHITECTURE «Внешние тестовые ресурсы»).
 
