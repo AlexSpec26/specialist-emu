@@ -36,7 +36,10 @@ M_GETTOP:
 
 
         ASSERT $ <= 0CE1Dh, "compat helpers run into CE1D"
-        ORG 0CE1Dh
+        ; free space up to CE1D keeps Monitor-2's own bytes: some games read ROM bytes as data
+        ; (Piton 3 reads CD21-CD28)
+        INCBIN "../base/spec_m2.rom", $-0C000h, 0CE1Dh-$
+        ASSERT $ == 0CE1Dh
 ; C818: print string (HL) up to 00
 M_PUTS: MOV A,M
         MOV C,A

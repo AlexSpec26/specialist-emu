@@ -129,20 +129,25 @@ OVERVIEW_DRAW:
         MVI C,18
         CALL PRINTAT
         TEXT "Шрифт:",0
-        ; character table 20-7F and 80-FF
+        ; character table 20-FF, 32 per row, printed as strings (fast path)
         MVI C,19
         MVI D,20h
 .row:   MVI B,4
         CALL GOTOXY
-.ch:    MOV A,D
-        CALL PUTCH
+        LXI H,APPVARS
+.ch:    MOV M,D
+        INX H
         INR D
-        JZ .end
         MOV A,D
         ANI 1Fh
         JNZ .ch
+        MVI M,0
+        LXI H,APPVARS
+        CALL PUTS
         INR C
-        JMP .row
+        MOV A,D
+        ORA A
+        JNZ .row
 .end:   MVI B,3
         MVI C,26
         CALL PRINTAT

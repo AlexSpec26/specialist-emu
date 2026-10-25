@@ -5,7 +5,7 @@
 ;             без единого изменения: около 60 % игр вызывают эти подпрограммы напрямую,
 ;             читают шрифт C400-C7FF, а некоторые — даже байты кода как данные.
 ;  C800-C838  таблица точек входа монитора, совместимая с Монитором-2.
-;  C839-EFFF  оболочка.
+;  C836-EBFF  оболочка;  EC00-EFFF  доп. символы 80-FF (выровнены по странице).
 ; =====================================================================================
 
 FONT            EQU 0C400h          ; base font, codes 00-7F, 8 bytes each (bits 4..0)
@@ -44,7 +44,13 @@ RUNMASK         EQU VARS+8          ; bit n = program n is running
 SHIFTK          EQU VARS+9          ; НР held during the last key
 GBUF            EQU VARS+10h        ; 8 bytes: glyph being drawn
 TMP             EQU VARS+18h        ; scratch
-APPVARS         EQU VARS+20h        ; 60h bytes for the programs
+GP1             EQU VARS+20h        ; 2 bytes each: glyph addresses for GRP4
+GP2             EQU VARS+22h
+GP3             EQU VARS+24h
+SPTR            EQU VARS+26h        ; 2 bytes: string pointer after GRP4
+CH4             EQU VARS+28h        ; 4 bytes: repeated character for REPCH
+SSAVE           EQU VARS+2Ch        ; 2 bytes: SP saved while scrolling
+APPVARS         EQU VARS+30h        ; 50h bytes for the programs
 
 ; ---------------------------------------------------------------- base ROM
         ORG 0C000h
@@ -79,9 +85,7 @@ M_RET:  RET                 ; C821
         JMP M_GETTOP        ; C833 get top of memory
         ASSERT $ == 0C836h
 
-; ---------------------------------------------------------------- data (C839-...)
-GLYPHS:
-        INCLUDE "glyphs.inc"
+; ---------------------------------------------------------------- data (C836-...)
         INCLUDE "keytab.inc"
         INCLUDE "coltab.inc"
 
@@ -91,4 +95,9 @@ GLYPHS:
         INCLUDE "apps.asm"
 
 ROM_END:
-        ASSERT ROM_END <= 0F000h, "ROM overflow"
+        ; glyphs 80-FF at the very end, page-aligned: glyph address = page + code (GADR)
+        ASSERT ROM_END <= 0EC00h, "ROM overflow: code runs into the glyphs at EC00"
+        ORG 0EC00h
+GLYPHS:
+        INCLUDE "glyphs.inc"
+        ASSERT $ == 0F000h

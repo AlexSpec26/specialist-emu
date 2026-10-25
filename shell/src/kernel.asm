@@ -173,7 +173,16 @@ PUTCH:  PUSH PSW
         RET
 
 ; print string (HL) up to 00; 01 = inverse on, 02 = inverse off. HL ends after the 00.
-PUTS:   MOV A,M
+; Aligned runs of 4 characters go through GRP4 (about twice as fast).
+PUTS:   LDA CURX
+        ANI 3
+        JNZ .one
+        LDA CURX
+        CPI 61
+        JNC .one
+        CALL GRP4
+        JNC PUTS
+.one:   MOV A,M
         INX H
         ORA A
         RZ
@@ -199,12 +208,37 @@ PRINTAT:
         CALL GOTOXY
         JMP PRINT
 
-; A = character, B = count
-REPCH:  INR B
+; A = character, B = count (A kept, B = 0 at the end)
+REPCH:  STA CH4
+        STA CH4+1
+        STA CH4+2
+        STA CH4+3
+        INR B
 .l:     DCR B
-        RZ
+        JZ .end
+        MOV A,B
+        CPI 4
+        JC .one
+        LDA CURX
+        ANI 3
+        JNZ .one
+        LDA CURX
+        CPI 61
+        JNC .one
+        PUSH H
+        LXI H,CH4
+        CALL GRP4
+        POP H
+        JC .one
+        DCR B
+        DCR B
+        DCR B
+        JMP .l
+.one:   LDA CH4
         CALL PUTCH
         JMP .l
+.end:   LDA CH4
+        RET
 
 ; print A as two hex digits
 PHEX8:  PUSH D
@@ -306,6 +340,633 @@ FRAME:  PUSH H
 
 FR_SINGLE:  TEXT "┌─┐│└┘"
 FR_DOUBLE:  TEXT "╔═╗║╚╝"
+
+; ---------------------------------------------------------------- fast text (ROM-001)
+; Four characters at a column divisible by 4 fill exactly 3 screen bytes per pixel row
+; (4 x 6 = 24 bits), so they are written whole, without reading the screen first.
+; HL -> 4 character codes. On success: CURX += 4, HL after them, carry clear. If one of
+; them is a control code (< 3): nothing drawn, HL unchanged, carry set. Keeps BC, DE.
+GRP4:   PUSH B
+        PUSH D
+        MOV B,M
+        INX H
+        MOV C,M
+        INX H
+        MOV D,M
+        INX H
+        MOV E,M
+        MOV A,B
+        CPI 3
+        JC .no
+        MOV A,C
+        CPI 3
+        JC .no
+        MOV A,D
+        CPI 3
+        JC .no
+        MOV A,E
+        CPI 3
+        JC .no
+        INX H
+        SHLD SPTR
+        MOV A,E
+        CALL GADR
+        SHLD GP3
+        MOV A,D
+        CALL GADR
+        SHLD GP2
+        MOV A,C
+        CALL GADR
+        SHLD GP1
+        MOV A,B
+        CALL GADR
+        XCHG                    ; DE = glyph 0
+        LDA CURX                ; screen: column CURX / 4 * 3, row CURY * 8
+        RRC
+        RRC
+        MOV C,A
+        ADD A
+        ADD C
+        ADI 90h
+        MOV H,A
+        LDA CURY
+        ADD A
+        ADD A
+        ADD A
+        MOV L,A
+        PUSH H                  ; for the inverse pass
+        PUSH H
+        LHLD GP1
+        MOV B,H
+        MOV C,L
+        POP H
+        ; byte 0 = glyph0 << 2 | glyph1 >> 4
+        LDAX B
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 03h
+        MOV M,A
+        LDAX D
+        ADD A
+        ADD A
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX B
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 03h
+        MOV M,A
+        LDAX D
+        ADD A
+        ADD A
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX B
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 03h
+        MOV M,A
+        LDAX D
+        ADD A
+        ADD A
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX B
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 03h
+        MOV M,A
+        LDAX D
+        ADD A
+        ADD A
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX B
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 03h
+        MOV M,A
+        LDAX D
+        ADD A
+        ADD A
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX B
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 03h
+        MOV M,A
+        LDAX D
+        ADD A
+        ADD A
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX B
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 03h
+        MOV M,A
+        LDAX D
+        ADD A
+        ADD A
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX B
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 03h
+        MOV M,A
+        LDAX D
+        ADD A
+        ADD A
+        ORA M
+        MOV M,A
+        INR L
+        MOV A,C                 ; DE = glyph 1 (glyphs never cross a page: 8-aligned)
+        SUI 7
+        MOV E,A
+        MOV D,B
+        MOV A,L
+        SUI 8
+        MOV L,A
+        INR H
+        PUSH H
+        LHLD GP2
+        MOV B,H
+        MOV C,L
+        POP H
+        ; byte 1 = glyph1 << 4 | glyph2 >> 2
+        LDAX D
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 0F0h
+        MOV M,A
+        LDAX B
+        RRC
+        RRC
+        ANI 0Fh
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX D
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 0F0h
+        MOV M,A
+        LDAX B
+        RRC
+        RRC
+        ANI 0Fh
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX D
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 0F0h
+        MOV M,A
+        LDAX B
+        RRC
+        RRC
+        ANI 0Fh
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX D
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 0F0h
+        MOV M,A
+        LDAX B
+        RRC
+        RRC
+        ANI 0Fh
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX D
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 0F0h
+        MOV M,A
+        LDAX B
+        RRC
+        RRC
+        ANI 0Fh
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX D
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 0F0h
+        MOV M,A
+        LDAX B
+        RRC
+        RRC
+        ANI 0Fh
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX D
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 0F0h
+        MOV M,A
+        LDAX B
+        RRC
+        RRC
+        ANI 0Fh
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX D
+        RRC
+        RRC
+        RRC
+        RRC
+        ANI 0F0h
+        MOV M,A
+        LDAX B
+        RRC
+        RRC
+        ANI 0Fh
+        ORA M
+        MOV M,A
+        INR L
+        MOV A,C
+        SUI 7
+        MOV E,A
+        MOV D,B
+        MOV A,L
+        SUI 8
+        MOV L,A
+        INR H
+        PUSH H
+        LHLD GP3
+        MOV B,H
+        MOV C,L
+        POP H
+        ; byte 2 = glyph2 << 6 | glyph3
+        LDAX D
+        RRC
+        RRC
+        ANI 0C0h
+        MOV M,A
+        LDAX B
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX D
+        RRC
+        RRC
+        ANI 0C0h
+        MOV M,A
+        LDAX B
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX D
+        RRC
+        RRC
+        ANI 0C0h
+        MOV M,A
+        LDAX B
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX D
+        RRC
+        RRC
+        ANI 0C0h
+        MOV M,A
+        LDAX B
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX D
+        RRC
+        RRC
+        ANI 0C0h
+        MOV M,A
+        LDAX B
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX D
+        RRC
+        RRC
+        ANI 0C0h
+        MOV M,A
+        LDAX B
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX D
+        RRC
+        RRC
+        ANI 0C0h
+        MOV M,A
+        LDAX B
+        ORA M
+        MOV M,A
+        INR E
+        INR C
+        INR L
+        LDAX D
+        RRC
+        RRC
+        ANI 0C0h
+        MOV M,A
+        LDAX B
+        ORA M
+        MOV M,A
+        INR L
+        POP H
+        LDA INV
+        ORA A
+        CNZ INV3
+        LHLD SPTR
+        LDA CURX
+        ADI 4                   ; clears carry
+        STA CURX
+        POP D
+        POP B
+        RET
+.no:    DCX H
+        DCX H
+        DCX H
+        POP D
+        POP B
+        STC
+        RET
+
+; invert the 3 x 8 bytes from HL (one 4-character group)
+INV3:   MVI B,3
+.c:
+        MOV A,M
+        CMA
+        MOV M,A
+        INR L
+        MOV A,M
+        CMA
+        MOV M,A
+        INR L
+        MOV A,M
+        CMA
+        MOV M,A
+        INR L
+        MOV A,M
+        CMA
+        MOV M,A
+        INR L
+        MOV A,M
+        CMA
+        MOV M,A
+        INR L
+        MOV A,M
+        CMA
+        MOV M,A
+        INR L
+        MOV A,M
+        CMA
+        MOV M,A
+        INR L
+        MOV A,M
+        CMA
+        MOV M,A
+        INR L
+        MOV A,L
+        SUI 8
+        MOV L,A
+        INR H
+        DCR B
+        JNZ .c
+        RET
+
+; HL = glyph address of character A (glyphs are 8-aligned; 4 pages per half of the set)
+GADR:   RLC
+        RLC
+        RLC
+        MOV H,A
+        ANI 07h
+        ADI LOW(PAGETAB)
+        MOV L,A
+        MOV A,H
+        MVI H,HIGH(PAGETAB)
+        MOV H,M
+        ANI 0F8h
+        MOV L,A
+        RET
+PAGETAB: DB HIGH(FONT), HIGH(FONT)+1, HIGH(FONT)+2, HIGH(FONT)+3
+        DB HIGH(GLYPHS), HIGH(GLYPHS)+1, HIGH(GLYPHS)+2, HIGH(GLYPHS)+3
+        ASSERT LOW(PAGETAB) <= 0F8h, "PAGETAB crosses a page"
+
+; ---------------------------------------------------------------- scrolling (ROM-001)
+; Text rows move by copying screen memory; the stack serves as a fast second pointer (the
+; Specialist has no interrupts). B = top row, C = bottom row, B < C. Changes A, BC, DE, HL.
+; SCROLLUP: rows B+1..C move up one row, row C is cleared.
+SCROLLUP:
+        LXI H,0
+        DAD SP
+        SHLD SSAVE
+        MOV A,C
+        SUB B
+        MOV C,A                 ; text rows to move
+        MOV A,B
+        ADD A
+        ADD A
+        ADD A
+        MOV B,A                 ; first destination byte in a column
+        MVI H,90h
+.col:   MOV A,B
+        ADI 8
+        MOV L,A
+        SPHL                    ; SP = source
+        MOV L,B                 ; HL = destination
+        MOV A,C
+.row:
+        POP D
+        MOV M,E
+        INR L
+        MOV M,D
+        INR L
+        POP D
+        MOV M,E
+        INR L
+        MOV M,D
+        INR L
+        POP D
+        MOV M,E
+        INR L
+        MOV M,D
+        INR L
+        POP D
+        MOV M,E
+        INR L
+        MOV M,D
+        INR L
+        DCR A
+        JNZ .row
+        MOV M,A
+        INR L
+        MOV M,A
+        INR L
+        MOV M,A
+        INR L
+        MOV M,A
+        INR L
+        MOV M,A
+        INR L
+        MOV M,A
+        INR L
+        MOV M,A
+        INR L
+        MOV M,A
+        INR L
+        INR H
+        MOV A,H
+        CPI 0C0h
+        JNZ .col
+        LHLD SSAVE
+        SPHL
+        RET
+
+; SCROLLDN: rows B..C-1 move down one row, row B is cleared.
+SCROLLDN:
+        LXI H,0
+        DAD SP
+        SHLD SSAVE
+        MOV A,C
+        SUB B
+        MOV E,A
+        MOV A,C
+        ADD A
+        ADD A
+        ADD A
+        DCR A
+        MOV B,A                 ; last source byte in a column
+        MOV C,E                 ; text rows to move
+        MVI H,90h
+.col:   MOV L,B
+        LXI D,9
+        DAD D
+        SPHL                    ; SP = one past the last destination byte
+        LXI D,-9
+        DAD D                   ; HL = last source byte
+        MOV A,C
+.row:
+        MOV D,M
+        DCR L
+        MOV E,M
+        DCR L
+        PUSH D
+        MOV D,M
+        DCR L
+        MOV E,M
+        DCR L
+        PUSH D
+        MOV D,M
+        DCR L
+        MOV E,M
+        DCR L
+        PUSH D
+        MOV D,M
+        DCR L
+        MOV E,M
+        DCR L
+        PUSH D
+        DCR A
+        JNZ .row
+        LXI D,0
+        PUSH D
+        PUSH D
+        PUSH D
+        PUSH D
+        INR H
+        MOV A,H
+        CPI 0C0h
+        JNZ .col
+        LHLD SSAVE
+        SPHL
+        RET
 
 ; ---------------------------------------------------------------- keyboard
 ; Scan the 12 x 6 matrix. Returns A = column*6 + row of the first pressed key, FF if none.

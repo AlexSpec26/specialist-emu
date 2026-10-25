@@ -18,7 +18,7 @@ shell/      ROM: оболочка в ПЗУ «Специалиста»
   tools/    asm80.py (ассемблер 8080), dis80.py, mkfont.py, mkkeys.py, lower.py (строчные)
   build/    shell.rom (собирается)
 flipper/    FLIP (заморожен): spec_core.c, specialist_app.c, assets
-tools/      настольные тесты (Java): CpuTest, MachineTest, ShellCompat (SPEC/ROM);
+tools/      настольные тесты (Java): CpuTest, MachineTest, ShellCompat, ShellSmoke, ShellTiming (SPEC/ROM);
             Z80FuseTest, ZexTest, ZxShot (ZX); flipper_core_test.c (FLIP)
 .github/workflows/  build.yml (SPEC), zx.yml (ZX), rom.yml (ROM), flipper.yml (FLIP, вручную)
 ```
@@ -28,7 +28,7 @@ tools/      настольные тесты (Java): CpuTest, MachineTest, ShellC
 | --- | --- | --- | --- |
 | SPEC | `app/**`, общие gradle-файлы, `tools/CpuTest.java`, `tools/MachineTest.java` | `build-N` | `specialist-N.apk` |
 | ZX | `zx/**`, `tools/ZexTest.java`, `tools/Z80FuseTest.java`, `tools/ZxShot.java` | `zx-build-N` | `zx-spectrum-N.apk` |
-| ROM | `shell/**`, `tools/ShellCompat.java` | `rom-build-N` | `shell-N.rom` |
+| ROM | `shell/**`, `tools/Shell*.java` | `rom-build-N` | `shell-N.rom` |
 | FLIP | только вручную (workflow_dispatch) | `flipper-N` | `.fap` |
 
 Подпись APK: только в CI из секретов `SIGNING_*` (ADR-014); без них сборка падает. Агенты ключ не
@@ -44,6 +44,11 @@ tools/      настольные тесты (Java): CpuTest, MachineTest, ShellC
 - Клавиатура: матрица 12×6, код = столбец·6 + строка; столбцы — порт A и младшая тетрада C,
   строки — порт B биты 2–7, НР — B бит 1, лента — B бит 0.
 - Оболочка: переменные 8F00–8F7F, стек под 8F00.
+- Раскладка ПЗУ оболочки: C800–C835 точки входа; таблицы; совместимые подпрограммы (CDxx, байты
+  Монитора-2 в свободном месте до CE1D, затем CE1D–CF3A фиксированно); ядро, оболочка, программы
+  до EBFF; EC00–EFFF доп. символы 80–FF (выровнены по странице — так быстрее адрес глифа).
+- Вывод текста: GRP4 — 4 символа с колонки ×4 в 3 байта целиком; PUTCH — один символ (чтение-
+  изменение-запись). Программам: строку в буфер, затем PUTS. Замер: `ShellTiming` (см. Команды).
 
 ## Внешние тестовые ресурсы (не в репозитории — лицензии)
 | Что | Откуда | Зачем |
@@ -60,5 +65,8 @@ tools/      настольные тесты (Java): CpuTest, MachineTest, ShellC
 - ROM, проверка совместимости:
   `javac -d /tmp/sp app/src/main/java/com/alexspec/specialist/core/*.java tools/ShellCompat.java` и
   `java -cp /tmp/sp ShellCompat <spec_m2.rom> shell/build/shell.rom <outdir> <GAMES>/*.rks`
+- ROM, скорость: после `javac ... tools/ShellTiming.java` —
+  `java -Dprofile=1 -cp /tmp/sp ShellTiming shell/build/shell.rom shell/build/shell.sym <outdir>`
+  (такты по подпрограммам, PNG экранов).
 - SPEC/ZX ядро: `javac` ядра + нужный тест из `tools/` (см. заголовки файлов).
 - Android: `gradle :app:assembleRelease`, `gradle :zx:assembleRelease` (в CI, Gradle 8.11.1, JDK 17).

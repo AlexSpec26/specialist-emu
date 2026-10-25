@@ -3,7 +3,7 @@ name: Build Specialist shell ROM
 on:
   push:
     branches: [ main ]
-    paths: [ 'shell/**', 'tools/ShellSmoke.java', 'tools/ShellCompat.java', '.github/workflows/rom.yml' ]
+    paths: [ 'shell/**', 'tools/ShellSmoke.java', 'tools/ShellCompat.java', 'tools/ShellTiming.java', '.github/workflows/rom.yml' ]
   workflow_dispatch:
 
 permissions:
@@ -34,6 +34,11 @@ jobs:
           mkdir -p /tmp/core
           javac -d /tmp/core app/src/main/java/com/alexspec/specialist/core/*.java tools/ShellSmoke.java
           java -cp /tmp/core ShellSmoke shell/build/shell.rom
+
+      - name: Screen speed and scrolling (ROM-001)
+        run: |
+          javac -d /tmp/core -cp /tmp/core tools/ShellTiming.java
+          java -Djava.awt.headless=true -Dstdout.encoding=UTF-8 -cp /tmp/core ShellTiming shell/build/shell.rom shell/build/shell.sym /tmp/timing 650
 
       - name: Rename
         run: cp shell/build/shell.rom shell-${{ github.run_number }}.rom
