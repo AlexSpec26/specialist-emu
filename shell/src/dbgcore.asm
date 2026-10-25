@@ -1,6 +1,7 @@
 ; =====================================================================================
-;  «Отладка» (ROM-003). Была отложена (rom-build-6..9), возвращена 2026-10-25 вместо
-;  «Монитора»: «попробуй для начала выкинуть монитор и вернуть отладчик».
+;  Debugger engine (ROM-003), shared by both ROMs: breakpoints, steps, run, stop.
+;  The ROM provides DBG_SAY (show message HL) and DBG_STOP (after the program stopped, SP
+;  is the shell's). Screen: dbgui.asm (shell), devel.asm (devel ROM).
 ; =====================================================================================
 
 DBG_INIT:
@@ -49,170 +50,6 @@ DVON    EQU APPVARS+4Dh         ; 1 = the vector at 0038 is ours
 DKIND   EQU APPVARS+4Eh         ; what DBG_PLANT writes: 0 RST 7, 1 CALL DBG_TRAPC
 DSTACK  EQU 8DFEh               ; program stack after F2; holds the return into the debugger
 
-DBG_DRAW:
-        CALL PRINTL
-        DB 36,4
-        TEXT "Стек",0
-        DB 4,4
-        TEXT "Код от PC (",01h,"►",02h," PC, * точка)",0
-        DB 4,24
-        TEXT "◄► регистр  ВК изменить  F2 PC=адрес  F8 точка останова",0
-        DB 4,25
-        TEXT "F5 шаг  F6 шаг без захода в CALL  F9 пуск до точки",0
-        DB 0FFh
-        CALL DBG_REGS
-        CALL DBG_CODE
-        CALL DBG_SIDE
-        LDA DEND
-        ORA A
-        RZ
-        XRA A
-        STA DEND
-        LXI H,S_G_END
-        JMP MEM_MSG
-
-; row 2: registers, the selected one inverted; row 3: flags
-DBG_REGS:
-        LXI H,LBUF
-        MVI M,C_VL2
-        INX H
-        MVI M,' '
-        INX H
-        LXI D,R_AF
-        MVI B,0
-.r:     MOV A,B
-        PUSH B
-        LXI B,S_G_NAMES
-        ADD A
-        ADD C
-        MOV C,A                 ; names never cross a page (ASSERT below)
-        LDAX B
-        MOV M,A
-        INX H
-        INX B
-        LDAX B
-        MOV M,A
-        INX H
-        MVI M,'='
-        INX H
-        POP B
-        LDA DSEL
-        CMP B
-        JNZ .n1
-        MVI M,01h
-        INX H
-.n1:    CALL BHEXW
-        LDA DSEL
-        CMP B
-        JNZ .n2
-        MVI M,02h
-        INX H
-.n2:    MVI M,' '
-        INX H
-        MVI M,' '
-        INX H
-        INR B
-        MOV A,B
-        CPI 6
-        JNZ .r
-        MVI C,65                ; 63 columns + the two inverse codes
-        CALL BPADTO
-        MVI B,0
-        MVI C,2
-        CALL BPRINT
-        ; flags S Z AC P C: letter when set
-        LXI H,LBUF
-        MVI M,C_VL2
-        INX H
-        LXI D,S_G_FLAGS
-        CALL BSTR
-        LDA R_AF
-        MOV B,A
-        LXI D,S_G_FL
-.f:     LDAX D
-        ORA A
-        JZ .fe
-        MOV C,A                 ; bit mask
-        INX D
-        LDAX D
-        INX D
-        MOV M,A
-        MOV A,B
-        ANA C
-        JNZ .fs
-        MVI M,C_DOT
-.fs:    INX H
-        MVI M,' '
-        INX H
-        JMP .f
-.fe:    MVI C,32
-        CALL BPADTO
-        MVI B,0
-        MVI C,3
-        JMP BPRINT
-S_G_NAMES: TEXT "AFBCDEHLSPPC"
-        ASSERT HIGH(S_G_NAMES) == HIGH($), "S_G_NAMES crosses a page"
-S_G_FLAGS: TEXT "  флаги: ",0
-S_G_FL: DB 80h,'S',40h,'Z',10h,'A',04h,'P',01h,'C',0
-
-; rows 5..20: 16 commands from PC as bytes
-DBG_CODE:
-        LHLD R_PC
-        XCHG
-        MVI C,5
-.l:     PUSH B
-        LXI H,LBUF
-        MVI M,C_VL2
-        INX H
-        MVI M,' '
-        INX H
-        LHLD R_PC
-        MOV A,L
-        CMP E
-        JNZ .np
-        MOV A,H
-        CMP D
-        JNZ .np
-        LXI H,LBUF+2
-        MVI M,0FBh              ; ►
-        JMP .bp
-.np:    LXI H,LBUF+2
-        MVI M,' '
-.bp:    INX H
-        CALL DBG_ISBP
-        MVI M,' '
-        JNZ .nb
-        MVI M,'*'
-.nb:    INX H
-        CALL BHEX16
-        MVI M,' '
-        INX H
-        MVI M,' '
-        INX H
-        LDAX D
-        CALL OPINFO
-.b:     LDAX D
-        CALL BHEX8
-        MVI M,' '
-        INX H
-        INX D
-        DCR B
-        JNZ .b
-        MVI C,32
-        CALL BPADTO
-        POP B
-        PUSH B
-        MVI B,0
-        PUSH D
-        CALL BPRINT
-        POP D
-        POP B
-        INR C
-        MOV A,C
-        CPI 21
-        JNZ .l
-        RET
-
 ; Z if DE is a breakpoint
 DBG_ISBP:
         PUSH H
@@ -233,88 +70,6 @@ DBG_ISBP:
 .x:     POP B
         POP H
         RET
-
-; right side: stack (8 words), memory at HL, breakpoints
-DBG_SIDE:
-        LHLD R_SP
-        XCHG
-        MVI C,5
-.s:     LXI H,LBUF
-        CALL BHEX16
-        MVI M,':'
-        INX H
-        MVI M,' '
-        INX H
-        CALL BHEXW
-        MVI B,36
-        PUSH D
-        CALL BPRINT
-        POP D
-        INR C
-        MOV A,C
-        CPI 13
-        JNZ .s
-        LXI H,LBUF
-        LXI D,S_G_HL
-        CALL BSTR
-        MVI B,36
-        MVI C,14
-        CALL BPRINT
-        LHLD R_HL
-        XCHG
-        LXI H,LBUF
-        MVI B,8
-.m:     LDAX D
-        CALL BHEX8
-        MVI M,' '
-        INX H
-        INX D
-        DCR B
-        JNZ .m
-        MVI B,36
-        MVI C,15
-        CALL BPRINT
-        LXI H,LBUF
-        LXI D,S_G_BPS
-        CALL BSTR
-        MVI B,36
-        MVI C,17
-        CALL BPRINT
-        LXI H,LBUF
-        LXI D,DBP
-        MVI B,4
-.p:     LDAX D
-        MOV C,A
-        INX D
-        LDAX D
-        DCX D
-        ANA C
-        INR A
-        JNZ .ph
-        MVI M,'-'               ; empty
-        INX H
-        MVI M,'-'
-        INX H
-        MVI M,'-'
-        INX H
-        MVI M,'-'
-        INX H
-        JMP .pn
-.ph:    CALL BHEXW
-        DCX D
-        DCX D
-.pn:    MVI M,' '
-        INX H
-        INX D
-        INX D
-        DCR B
-        JNZ .p
-        MVI B,36
-        MVI C,18
-        JMP BPRINT
-S_G_HL:  TEXT "(HL):",0
-S_G_BPS: TEXT "Точки останова:",0
-S_G_END: TEXT "программа вернулась в отладку (RET)",0
 
 ; A = opcode -> B = length, C = 0 plain, 1 jump, 2 call, 3 return, 4 PCHL, 5 RST.
 ; Keeps A, DE, HL.
@@ -372,75 +127,6 @@ OPINFO: PUSH D
         POP D
         RET
 
-; ---------------------------------------------------------------- debugger: keys
-DBG_KEY:
-        LDA TMP
-        CPI 18h                 ; →
-        JZ .next
-        CPI 08h                 ; ←
-        JZ .prev
-        CPI 0Dh
-        JZ DBG_EDIT
-        CPI 0C2h                ; F2
-        JZ DBG_GO_ADDR
-        CPI 0C5h                ; F5
-        JZ .step
-        CPI 0C6h                ; F6
-        JZ .over
-        CPI 0C8h                ; F8
-        JZ DBG_BREAK
-        CPI 0C9h                ; F9
-        JZ DBG_RUN
-        RET
-.next:  LDA DSEL
-        INR A
-        CPI 6
-        JC .sel
-        XRA A
-        JMP .sel
-.prev:  LDA DSEL
-        DCR A
-        JP .sel
-        MVI A,5
-.sel:   STA DSEL
-        JMP DBG_REGS
-.step:  XRA A
-        JMP DBG_STEP
-.over:  MVI A,1
-        JMP DBG_STEP
-
-; ВК: new value of the selected register
-DBG_EDIT:
-        LXI H,S_G_VAL
-        CALL MEM_ASK
-        JC MEM_CLRMSG
-        XCHG
-        LDA DSEL
-        ADD A
-        MOV C,A
-        MVI B,0
-        LXI H,R_AF
-        DAD B
-        MOV M,E
-        INX H
-        MOV M,D
-        CALL MEM_CLRMSG
-        CALL DBG_REGS
-        CALL DBG_CODE
-        JMP DBG_SIDE
-S_G_VAL: TEXT "новое значение: ",0
-
-; F2: PC = address, SP = DSTACK with a return into the debugger
-DBG_GO_ADDR:
-        LXI H,S_M_GO
-        CALL MEM_ASK
-        JC MEM_CLRMSG
-        SHLD R_PC
-        CALL MEM_CLRMSG
-        CALL DBG_SETSP
-        CALL DBG_REGS
-        CALL DBG_CODE
-        JMP DBG_SIDE
 DBG_SETPC:
         LXI H,0
         SHLD R_PC
@@ -450,49 +136,6 @@ DBG_SETSP:
         LXI H,DSTACK
         SHLD R_SP
         RET
-
-; F8: add a breakpoint, or remove it if it is there
-DBG_BREAK:
-        LXI H,S_G_BP
-        CALL MEM_ASK
-        JC MEM_CLRMSG
-        XCHG
-        CALL DBG_ISBP
-        JNZ .add
-        LXI H,DBP               ; remove: find it again
-.f:     MOV A,M
-        INX H
-        CMP E
-        JNZ .f2
-        MOV A,M
-        CMP D
-        JZ .rm
-.f2:    INX H
-        JMP .f
-.rm:    MVI M,0FFh
-        DCX H
-        MVI M,0FFh
-        JMP .done
-.add:   LXI H,DBP
-        MVI B,4
-.a:     MOV A,M
-        INX H
-        ANA M
-        INR A
-        JZ .put
-        INX H
-        DCR B
-        JNZ .a
-        LXI H,S_G_FULL
-        JMP MEM_MSG
-.put:   MOV M,D
-        DCX H
-        MOV M,E
-.done:  CALL MEM_CLRMSG
-        CALL DBG_CODE
-        JMP DBG_SIDE
-S_G_BP:   TEXT "точка останова (есть - снять): ",0
-S_G_FULL: TEXT "точек уже 4",0
 
 ; F5 / F6 (A = 1: do not go into CALL / RST)
 DBG_STEP:
@@ -590,7 +233,7 @@ DBG_STEP:
 DBG_REFUSE:
         XRA A
         STA DMODE
-        JMP MEM_MSG
+        JMP DBG_SAY
 S_G_TOROM: TEXT "переход в ПЗУ: шаг нельзя, поставьте точку и F9",0
 S_G_PCROM: TEXT "PC в ПЗУ: шаг нельзя",0
 
@@ -676,12 +319,7 @@ DBG_SAVE:
         STA DMODE
         CALL DBG_PLANTBP
         JMP DBG_GO
-.stop:  MVI A,3                 ; show the debugger (program 3)
-        STA CURAPP
-        LDA RUNMASK
-        ORI 8
-        STA RUNMASK
-        JMP MAIN
+.stop:  JMP DBG_STOP              ; the ROM shows the stop its own way
 
 ; the program's last RET comes here (pushed by F2)
 DBG_DONE:
@@ -693,3 +331,41 @@ DBG_DONE:
         LXI H,DBG_DONE
         JMP DBG_SAVE
 
+
+; add a breakpoint at DE, or remove it if it is there. Carry if there are already 4.
+DBG_TOGGLE:
+        CALL DBG_ISBP
+        JNZ .add
+        LXI H,DBP               ; remove: find it again
+.f:     MOV A,M
+        INX H
+        CMP E
+        JNZ .f2
+        MOV A,M
+        CMP D
+        JZ .rm
+.f2:    INX H
+        JMP .f
+.rm:    MVI M,0FFh
+        DCX H
+        MVI M,0FFh
+        ORA A
+        RET
+.add:   LXI H,DBP
+        MVI B,4
+.a:     MOV A,M
+        INX H
+        ANA M
+        INR A
+        JZ .put
+        INX H
+        DCR B
+        JNZ .a
+        STC
+        RET
+.put:   MOV M,D
+        DCX H
+        MOV M,E
+        ORA A
+        RET
+S_G_FULL: TEXT "точек уже 4",0
