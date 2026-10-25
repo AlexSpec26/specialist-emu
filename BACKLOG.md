@@ -171,7 +171,7 @@
 - SPEC-D09 обрезанный текст экскурсии исправлен, build-18
 
 ### SPEC-019 — Управление временем как в ZX Spectrum
-- Status: In progress
+- Status: Review
 - Priority: P1 (proposed)
 - Origin: user message, 2026-10-25
 - Original user wording: «перенести функции управления временем из Android-эмулятора ZX Spectrum в Android-эмулятор „Специалиста“».
@@ -182,8 +182,14 @@
   восстановления; сборки SPEC и неизменённого ZX; PR владельцу, без merge.
 - Constraints and preferences: не менять shell/ и ZX; внешняя лента не должна нарушать
   детерминизм; перемотка вне UI-потока; сохранить существующие функции.
-- Implementation: branch `codex/spec-019-time-controls`.
-- Validation: not yet tested.
+- Implementation: branch `codex/spec-019-time-controls`, PR https://github.com/AlexSpec26/specialist-emu/pull/2.
+- Validation: 9 JUnit tests passed (включая переходы между снимками, клавиши, EI/HLT,
+  побайтовое восстановление состояния и звука, v1 saves); TST8080, 8080PRE, CPUTEST passed.
+  `gradle :app:testDebugUnitTest :app:assembleDebug :zx:assembleDebug` — BUILD SUCCESSFUL.
+  На телефоне не проверялось. Нужна проверка владельцем; merge не выполнен.
+- Limitations: при внешнем входе/записи ленты история очищается, шаги UI требуют её отключения;
+  время округляется до границы целой команды; снимки занимают около 30 МиБ, история в RAM.
+  На HLT шаг = 4 такта ожидания. Последняя ступень скорости округлена до 1 такта/с.
 - Open questions: нет.
 - Last updated: 2026-10-25, ChatGPT-Codex
 

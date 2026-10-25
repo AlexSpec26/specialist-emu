@@ -1,53 +1,49 @@
 # Current handoff
-- Updated at (UTC): 2026-10-25 19:40
-- Outgoing agent: Claude (Claude Code, облачная сессия)
-- Branch: main (короткие ветки на задачу пока не заводились — см. OPS-002)
-- Last pushed commit: см. `git log -1`
-- Open PR: нет
-- Active backlog IDs: нет. ROM-DEV на паузе; SPEC-IDEA-002 (ассемблер в эмуляторе) — владелец думает.
-  ПЗУ оболочки: резерв 226 байт.
-- User-approved goal for this session: ядро и совместимость (сделано), память проекта (сделано),
-  ключ подписи в секретах (OPS-001, сделано), «давай» → ROM-001, ROM-002 (сделаны)
+- Updated at (UTC): 2026-10-25 23:49
+- Outgoing agent: ChatGPT-Codex
+- Branch: codex/spec-019-time-controls
+- Last pushed implementation commit: 03e47a2 (после него синхронизация main и документация; `git log -1`)
+- Open PR: https://github.com/AlexSpec26/specialist-emu/pull/2 (без merge)
+- Active backlog IDs: SPEC-019 — Review
+- User-approved goal for this session: управление временем из ZX в app; shell/ и zx/ без изменений.
 
 ## What changed and why
-- OPS-001: подпись APK только из секретов; старый ключ удалён; build-23 и zx-build-6 подписаны
-  новым ключом (отпечаток сверен в APK).
-- ROM-001: GRP4 (4 символа → 3 байта), PUTS/REPCH через него, SCROLLUP/SCROLLDN; глифы 80–FF
-  перенесены в EC00; свободное место до CE1D — байты Монитора-2 (ADR-015).
-
-- ROM-002: «Память» (apps.asm), помощники строк и ввода hex в kernel.asm (BHEX8, BDEC, HEXIN,
-  ...), SCROLLUP/DN с шириной в E; «Обзор» вынесен в overview.asm перед CD21.
-
-- ROM-003: «Отладка» (apps.asm, ADR-016), ShellDbgTest в CI.
-
-- «Отладка» отложена (debugger.asm не подключён); ROM-006 «Магнитофон», тёплый старт C800.
-
-- ROM-012 правка в «Памяти»; ROM-007 «Монитор»; NAPPS = 4 (Обзор, Память, Магнитофон, Монитор).
-
-- ADR-017 код в пустотах ПЗУ; ADR-018 Отладка вместо Монитора; имена файлов на ленте; F7.
-
-- ROM-DEV (пауза): devel.asm, dis.asm (+ShellDisTest в CI), dbgcore/dbgui, tapecore, common.asm,
-  compat1–4; devmon.asm — черновик, не собран.
+- ±1 инструкция 8080, ±1 секунда, история около 10 с через снимки + replay с точным вводом клавиш.
+- Восстановление CPU (pending EI), памяти/цвета, ВВ55, времени, состояния аудио. Save v2 читает v1.
+- Ползунок ×4…1 такт/с, индикатор скорости, кнопки паузы, занятость и граница истории.
+- Работа в EmuThread; повторные запросы блокируются; внешняя лента исключает недетерминированный replay.
+- PR-проверки без ключей выпуска и публикации релизов; ZX собирается как явная проверка SPEC-019.
+- Удалена тестовая ветка codex/github-write-test по просьбе владельца.
+- Сохранены актуальные изменения Claude (origin/main a0c142f), включая DOC-001 и SPEC-IDEA-002.
+  Предыдущая передача: docs/handoffs/2026-10-25-claude-before-spec019.md.
 
 ## Verified results
-- ShellMemTest — MEMORY OK; ShellTiming — «Память» 0,72 с, ↓ с прокруткой 175 мс.
-- `ShellTiming`: «Обзор» 955 → 595 мс, строка 64 символа 44 → 24 мс, прокрутка 30 строк 109 мс;
-  экраны байт в байт как до изменений; прокрутка вверх/вниз совпадает с эталоном.
-- `ShellSmoke` — SHELL OK; `ShellCompat` — 122 из 127 одинаково (как и раньше).
-- Not run / why: на телефоне не проверялось.
+- `gradle :app:testDebugUnitTest :app:assembleDebug :zx:assembleDebug` — BUILD SUCCESSFUL (28 s).
+- 9 JUnit tests: 0 failures/errors/skipped; replay через снимки, CPU/RAM/ВВ55/цвет, клавиши,
+  EI/HLT, секунды/границы 10 с, v1 saves, повреждённый save, внешняя лента, звук побитно.
+- Desktop CpuTest: TST8080 — CPU IS OPERATIONAL; 8080PRE — complete; CPUTEST — CPU TESTS OK.
+- `git diff origin/main -- shell zx` — пусто; исходники других эмуляторов не менялись.
+- Not run: на телефоне не проверялось; подписанный release не собирался (ключи только в CI).
+- Initial environment failures resolved: установлен JDK/Gradle/SDK в /workspace/toolchains,
+  сетевые зависимости через proxy; ANDROID_USER_HOME задан в writable /workspace.
 
 ## Known problems and risks
-- Цели ROM-001 (0,35 с / 0,1 с) не достигнуты — см. BACKLOG ROM-001; программам печатать
-  строками через буфер и PUTS.
-- Treasure/Treasure 2: пейзаж другой (ROM-Q1). Заморозка будет портить экран игры (ROM-Q2).
+- История занимает ~30 МиБ RAM, сбрасывается при загрузках/reset/внешней записи памяти.
+- Вход с микрофона/внешняя запись очищают историю; UI просит отключить их перед шагами.
+- Временные шаги округляются до инструкции; HLT = 4 такта ожидания; скорость 1 такт/с — средняя
+  (ядро выполняет целые инструкции). Новые v2 saves не читаются старой версией приложения.
+- Требуется проверка размеров/удобства кнопок на телефоне.
+- Сохранённые блокеры ROM (вне задачи): ROM-DEV на паузе; ROM-Q1, ROM-Q2; цели ROM-001 по
+  скорости не достигнуты. См. предыдущую передачу и BACKLOG.
 
 ## Decisions made or proposed
-- Принятые: ADR-002…019.
+- ADR-020: адаптация истории ZX к 8080 с точным журналом клавиш и явным ограничением live tape.
 
 ## Exact next steps (ordered)
-1. Ждать решения владельца: SPEC-IDEA-002 или продолжение ROM-DEV.
-3. Перед каждым коммитом ROM: собрать, `ShellSmoke`, `ShellTiming`, по возможности
-   `ShellCompat` (игры — см. ARCHITECTURE «Внешние тестовые ресурсы»).
+1. Проверить PR #2 и CI; на устройстве проверить паузу, ±1 команду, ±1 с и ползунок скорости.
+2. Владельцу решить о merge PR; агент не выполняет merge в main.
+3. Другие направления (SPEC-IDEA-002, ROM-DEV) только по отдельной просьбе владельца.
 
 ## Questions requiring the user's approval
-- ROM-Q1, ROM-Q2.
+- Для завершённой реализации SPEC-019 нет; review/merge выполняет владелец.
+- Не снятые вопросы ROM: ROM-Q1, ROM-Q2 (не относятся к этой работе).
