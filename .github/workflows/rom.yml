@@ -45,6 +45,11 @@ jobs:
           javac -d /tmp/core -cp /tmp/core tools/ShellMemTest.java
           java -Djava.awt.headless=true -Dstdout.encoding=UTF-8 -cp /tmp/core ShellMemTest shell/build/shell.rom shell/build/shell.sym /tmp/memtest
 
+      - name: Program "Отладка" driven by keys (ROM-003)
+        run: |
+          javac -d /tmp/core -cp /tmp/core tools/ShellDbgTest.java
+          java -Djava.awt.headless=true -Dstdout.encoding=UTF-8 -cp /tmp/core ShellDbgTest shell/build/shell.rom shell/build/shell.sym /tmp/dbgtest
+
       - name: Rename
         run: cp shell/build/shell.rom shell-${{ github.run_number }}.rom
 

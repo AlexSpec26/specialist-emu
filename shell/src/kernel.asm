@@ -999,6 +999,17 @@ BHEX16: MOV A,D
         MOV A,E
         JMP BHEX8
 
+; the word at (DE) as four hex digits; DE += 2
+BHEXW:  INX D
+        LDAX D
+        CALL BHEX8
+        DCX D
+        LDAX D
+        CALL BHEX8
+        INX D
+        INX D
+        RET
+
 ; A as eight binary digits; changes B, C
 BBIN8:  MVI C,8
         MOV B,A

@@ -59,7 +59,7 @@ public class ShellTiming {
         long ov = call("REDRAW");
         report("REDRAW Обзор", ov);
         save(out, "overview");
-        m.write(sym.get("CURAPP"), 2);
+        m.write(sym.get("CURAPP"), 5);
         long st = call("REDRAW");
         report("REDRAW заглушка", st);
         save(out, "stub");
@@ -73,6 +73,11 @@ public class ShellTiming {
             report("Память: ↓", call("MEM_KEY"));
             for (int i = 0; i < 14; i++) call("MEM_KEY");
             report("Память: ↓ с прокруткой", call("MEM_KEY"));
+        }
+        if (sym.containsKey("DBG_DRAW")) {
+            m.write(sym.get("CURAPP"), 2);
+            report("REDRAW Отладка (каждый шаг)", call("REDRAW"));
+            save(out, "debugger");
         }
         m.write(sym.get("CURAPP"), 0);
         // one full text row: 64 characters, normal and inverted
