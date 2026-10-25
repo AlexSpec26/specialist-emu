@@ -39,3 +39,4 @@ GLYPHS:
         ASSERT $ == 0F000h
 
 START   EQU SHELL_INIT          ; C800 jumps here (common.asm)
+DSTACK  EQU 8DFEh               ; debugger: program stack after F2, holds the return to it

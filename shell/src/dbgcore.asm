@@ -48,7 +48,6 @@ DN1     EQU APPVARS+49h         ; step: next address and branch target
 DN2     EQU APPVARS+4Bh
 DVON    EQU APPVARS+4Dh         ; 1 = the vector at 0038 is ours
 DKIND   EQU APPVARS+4Eh         ; what DBG_PLANT writes: 0 RST 7, 1 CALL DBG_TRAPC
-DSTACK  EQU 8DFEh               ; program stack after F2; holds the return into the debugger
 
 ; Z if DE is a breakpoint
 DBG_ISBP:
