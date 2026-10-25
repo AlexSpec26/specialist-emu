@@ -3,7 +3,7 @@ name: Build Specialist shell ROM
 on:
   push:
     branches: [ main ]
-    paths: [ 'shell/**', 'tools/ShellSmoke.java', 'tools/ShellCompat.java', 'tools/ShellTiming.java', '.github/workflows/rom.yml' ]
+    paths: [ 'shell/**', 'tools/ShellSmoke.java', 'tools/ShellCompat.java', 'tools/ShellTiming.java', 'tools/ShellDisTest.java', 'tools/dis8080_expected.txt', '.github/workflows/rom.yml' ]
   workflow_dispatch:
 
 permissions:
@@ -25,9 +25,12 @@ jobs:
           mkdir -p shell/build
           cd shell/src
           python3 ../tools/asm80.py main.asm -o ../build/shell.rom --base C000 --size 3000 -l ../build/shell.lst -s ../build/shell.sym
+          python3 ../tools/asm80.py devel.asm -o ../build/devel.rom --base C000 --size 3000 -l ../build/devel.lst -s ../build/devel.sym
 
       - name: Base 2 KB unchanged (ADR-002)
-        run: cmp <(head -c 2048 shell/build/shell.rom) <(head -c 2048 shell/base/spec_m2.rom)
+        run: |
+          cmp <(head -c 2048 shell/build/shell.rom) <(head -c 2048 shell/base/spec_m2.rom)
+          cmp <(head -c 2048 shell/build/devel.rom) <(head -c 2048 shell/base/spec_m2.rom)
 
       - name: Boots into the shell in the emulator core
         run: |
@@ -55,23 +58,35 @@ jobs:
           javac -d /tmp/core -cp /tmp/core tools/ShellDbgTest.java
           java -Djava.awt.headless=true -Dstdout.encoding=UTF-8 -cp /tmp/core ShellDbgTest shell/build/shell.rom shell/build/shell.sym /tmp/dbgtest
 
+      - name: Devel ROM — disassembler and assembler on all 256 opcodes
+        run: |
+          javac -d /tmp/core -cp /tmp/core tools/ShellDisTest.java
+          java -Dstdout.encoding=UTF-8 -cp /tmp/core ShellDisTest shell/build/devel.rom shell/build/devel.sym tools/dis8080_expected.txt
+
       - name: Rename
-        run: cp shell/build/shell.rom shell-${{ github.run_number }}.rom
+        run: |
+          cp shell/build/shell.rom shell-${{ github.run_number }}.rom
+          cp shell/build/devel.rom devel-${{ github.run_number }}.rom
 
       - uses: actions/upload-artifact@v4
         with:
           name: shell-rom-${{ github.run_number }}
           path: |
             shell-${{ github.run_number }}.rom
+            devel-${{ github.run_number }}.rom
             shell/build/shell.lst
+            shell/build/devel.lst
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: rom-build-${{ github.run_number }}
           name: ПЗУ-оболочка «Специалиста», сборка ${{ github.run_number }}
-          files: shell-${{ github.run_number }}.rom
+          files: |
+            shell-${{ github.run_number }}.rom
+            devel-${{ github.run_number }}.rom
           make_latest: false
           body: |
             Своё ПЗУ «Специалиста» с оболочкой. В эмуляторе: меню ☰ → «Сменить ПЗУ» → shell-${{ github.run_number }}.rom.
             После включения на «PROGRAM ?» нажмите F1, затем ВК.
+            devel-${{ github.run_number }}.rom — среда разработки (в работе).
