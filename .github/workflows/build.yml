@@ -3,6 +3,7 @@ name: Build APK
 on:
   push:
     branches: [ main ]
+    paths-ignore: [ 'zx/**', 'flipper/**', '.github/workflows/zx.yml', '.github/workflows/flipper.yml', 'tools/Z*.java', 'tools/flipper_core_test.c' ]
   workflow_dispatch:
 
 permissions:
@@ -33,7 +34,7 @@ jobs:
           grep -q "CPU TESTS OK" /tmp/cpu.log
 
       - name: Build APK
-        run: gradle --no-daemon assembleRelease
+        run: gradle --no-daemon :app:assembleRelease
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk specialist-${{ github.run_number }}.apk

@@ -1,0 +1,13 @@
+Games bundled with this emulator (unchanged original files):
+
+The Mojon Twins (http://www.mojontwins.com) - Sir Ababol, Sir Ababol DX, Lala Prologue,
+Cheril of the Bosque, Cheril Perils, Cheril the Goddess, Horace Goes to the Tower,
+Cadaverion, Columns, Judge Morry vs Baldo Midget, Leovigildo (part 1), El Hobbit (Vah-ka's Cut),
+Mariano the Dragon.
+Licensed under Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported
+(CC BY-NC-SA 3.0): https://creativecommons.org/licenses/by-nc-sa/3.0/
+
+Lost in Worlds - Nihirash (https://nihirash.itch.io/lost-in-worlds): "Feel free to redistribute game!"
+
+ZX Spectrum 48K ROM - copyright Amstrad; Amstrad have given permission for ROM images to be
+distributed for use with emulators.

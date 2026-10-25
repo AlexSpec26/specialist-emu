@@ -26,7 +26,8 @@ public final class TapeDecoder implements TapeInput {
     private static final int CAP = 1 << 17; // ~3 s at 44.1 kHz
     private final boolean[] ring = new boolean[CAP];
     private volatile long produced; // total samples written
-    private long startCycle = -1, startSample;
+    private long lastCycle = -1;
+    private double readPos;
     /** maximum lag allowed between emulator and live audio before skipping ahead (samples) */
     private final long maxLag;
 
@@ -49,7 +50,7 @@ public final class TapeDecoder implements TapeInput {
         lpA = (float) (1 - Math.exp(-2 * Math.PI * lpHz / sampleRate));
         envDecay = (float) Math.exp(-1.0 / (0.05 * sampleRate));
         envA = (float) (1 - Math.exp(-1.0 / (0.02 * sampleRate)));
-        maxLag = sampleRate / 4;
+        maxLag = sampleRate / 2;
     }
 
     /** Feeds 16-bit PCM samples. */
@@ -93,33 +94,36 @@ public final class TapeDecoder implements TapeInput {
         produced = p;
     }
 
-    /** Emulator side: level at the given CPU cycle, following live audio with bounded lag. */
+    /**
+     * Emulator side: level at the given CPU cycle, following live audio with bounded lag.
+     * The emulator's clock and the sound card's clock never agree exactly, so the read position
+     * runs up to 2% faster or slower to keep about 50 ms behind the newest sample (a loader
+     * tolerates that easily); only a big jump (emulation stalled) is fixed by skipping.
+     */
     @Override
     public synchronized boolean level(long cycle) {
         long have = produced;
         if (have == 0) return out;
-        if (startCycle < 0) {
-            startCycle = cycle;
-            startSample = Math.max(0, have - sampleRate / 20); // start ~50 ms behind live audio
+        double target = sampleRate / 20.0;
+        if (lastCycle < 0 || cycle < lastCycle) {
+            lastCycle = cycle;
+            readPos = Math.max(0, have - target);
         }
-        long idx = startSample + (cycle - startCycle) * sampleRate / cpuHz;
-        if (idx >= have) {
-            // emulator is ahead of the microphone: wait on the newest sample
-            idx = have - 1;
-            startSample = idx;
-            startCycle = cycle;
-        } else if (have - idx > maxLag || have - idx >= CAP) {
-            // fell behind (e.g. emulation slowed down): skip ahead to stay live
-            idx = have - sampleRate / 20;
-            startSample = idx;
-            startCycle = cycle;
+        double lag = have - readPos;
+        double rate = 1 + Math.max(-0.02, Math.min(0.02, (lag - target) / target * 0.02));
+        readPos += (cycle - lastCycle) * (double) sampleRate / cpuHz * rate;
+        lastCycle = cycle;
+        if (readPos >= have) {
+            readPos = have - 1; // emulator is ahead of the microphone: wait on the newest sample
+        } else if (have - readPos > maxLag || have - readPos >= CAP) {
+            readPos = have - target; // fell far behind: skip ahead to stay live
         }
-        return ring[(int) (idx & (CAP - 1))];
+        return ring[(int) (((long) readPos) & (CAP - 1))];
     }
 
     /** Restart time alignment (call when (re)connecting to the emulator). */
     public synchronized void resync() {
-        startCycle = -1;
+        lastCycle = -1;
     }
 
     /** Peak level over the last 0.1 s, 0..1 (after DC removal). */

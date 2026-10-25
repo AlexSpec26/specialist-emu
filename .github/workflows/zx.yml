@@ -1,0 +1,58 @@
+name: Build ZX Spectrum APK
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'zx/**', 'tools/ZexTest.java', '.github/workflows/zx.yml' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Z80 self-test (zexall, all documented and undocumented flags)
+        run: |
+          mkdir -p /tmp/core
+          javac -d /tmp/core zx/src/main/java/com/alexspec/zx/core/*.java tools/ZexTest.java
+          git clone --depth 1 https://github.com/superzazu/z80 /tmp/z80t
+          java -cp /tmp/core ZexTest /tmp/z80t/roms/zexall.cim | tee /tmp/zex.log
+          grep -q "Tests complete" /tmp/zex.log
+          test "$(grep -c 'OK$' /tmp/zex.log)" = "67"
+          ! grep -q "ERROR" /tmp/zex.log
+
+      - name: Build APK
+        run: gradle --no-daemon :zx:assembleRelease
+
+      - name: Rename APK
+        run: cp zx/build/outputs/apk/release/zx-release.apk zx-spectrum-${{ github.run_number }}.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zx-spectrum-apk-${{ github.run_number }}
+          path: zx-spectrum-${{ github.run_number }}.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: zx-build-${{ github.run_number }}
+          name: ZX Spectrum 48K, сборка ${{ github.run_number }}
+          files: zx-spectrum-${{ github.run_number }}.apk
+          make_latest: false
+          body: |
+            Эмулятор ZX Spectrum 48K. Установка: скачайте zx-spectrum-${{ github.run_number }}.apk ниже на телефон и откройте файл.
+            Это отдельное приложение, «Специалист» остаётся на месте. Обновление ставится поверх, настройки и сохранения не теряются.
+            В комплекте бесплатные игры The Mojon Twins (CC BY-NC-SA 3.0) и Nihirash.
