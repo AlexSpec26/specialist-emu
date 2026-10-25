@@ -4,7 +4,7 @@
 - Branch: main (короткие ветки на задачу пока не заводились — см. OPS-002)
 - Last pushed commit: см. `git log -1` (коммит «ROM-001 ...»)
 - Open PR: нет
-- Active backlog IDs: ROM-007 «Монитор»
+- Active backlog IDs: нет активных; дальше — по решению владельца (ROM-005, ROM-Q1/Q2)
 - User-approved goal for this session: ядро и совместимость (сделано), память проекта (сделано),
   ключ подписи в секретах (OPS-001, сделано), «давай» → ROM-001, ROM-002 (сделаны)
 
@@ -20,6 +20,8 @@
 - ROM-003: «Отладка» (apps.asm, ADR-016), ShellDbgTest в CI.
 
 - «Отладка» отложена (debugger.asm не подключён); ROM-006 «Магнитофон», тёплый старт C800.
+
+- ROM-012 правка в «Памяти»; ROM-007 «Монитор»; NAPPS = 4 (Обзор, Память, Магнитофон, Монитор).
 
 ## Verified results
 - ShellMemTest — MEMORY OK; ShellTiming — «Память» 0,72 с, ↓ с прокруткой 175 мс.
@@ -37,7 +39,7 @@
 - Принятые: ADR-002…015.
 
 ## Exact next steps (ordered)
-1. ROM-007 «Монитор».
+1. Ждать указаний владельца. Кандидаты: ROM-005 заморозка (нужно место), ROM-009 C80F/C827.
 3. Перед каждым коммитом ROM: собрать, `ShellSmoke`, `ShellTiming`, по возможности
    `ShellCompat` (игры — см. ARCHITECTURE «Внешние тестовые ресурсы»).
 

@@ -55,7 +55,7 @@ SCREND          EQU VARS+2Eh        ; scrolling stops at this screen page
 APPVARS         EQU VARS+30h        ; 50h bytes: state of the programs (kept while switching)
 LBUF            EQU 8E00h           ; 64 bytes: line being built (page-aligned: L = length)
 INBUF           EQU 8E40h           ; 16 bytes: digits typed by HEXIN
-; shell stack: 8F00 down to about 8E50
+; 8E50-8E7F: command line of «Монитор»; shell stack: 8F00 down to about 8E80
 
 ; characters of the shell set
 C_HL            EQU 0E0h            ; ─

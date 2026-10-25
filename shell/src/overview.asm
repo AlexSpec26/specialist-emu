@@ -56,7 +56,7 @@ OVERVIEW_DRAW:
         MVI B,4
         MVI C,13
         CALL PRINTAT
-        TEXT "НР+F11  (позже) заморозить игру и открыть отладку",0
+        TEXT "F2-F6   команды программы - подсказка внизу её окна",0
         MVI B,4
         MVI C,15
         CALL PRINTAT

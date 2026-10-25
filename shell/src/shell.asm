@@ -2,7 +2,7 @@
 ;  Shell: start-up, screen frame (menu line, status line), program switching
 ; =====================================================================================
 
-NAPPS   EQU 5
+NAPPS   EQU 4
 
 SHELL_INIT:
         LXI SP,STACK_TOP

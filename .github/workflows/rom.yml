@@ -50,6 +50,11 @@ jobs:
           javac -d /tmp/core -cp /tmp/core tools/ShellTapeTest.java
           java -Djava.awt.headless=true -Dstdout.encoding=UTF-8 -cp /tmp/core ShellTapeTest shell/build/shell.rom shell/build/shell.sym shell/base/spec_m2.rom /tmp/tapetest
 
+      - name: Program "Монитор" typed key by key (ROM-007)
+        run: |
+          javac -d /tmp/core -cp /tmp/core tools/ShellMonTest.java
+          java -Djava.awt.headless=true -Dstdout.encoding=UTF-8 -cp /tmp/core ShellMonTest shell/build/shell.rom shell/build/shell.sym /tmp/montest
+
       - name: Rename
         run: cp shell/build/shell.rom shell-${{ github.run_number }}.rom
 

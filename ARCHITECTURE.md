@@ -13,13 +13,14 @@ zx/         ZX: Android-приложение ZX Spectrum 48K (com.alexspec.zx)
   assets/   48k.rom, games/*.tap|tzx + LICENSE.txt
 shell/      ROM: оболочка в ПЗУ «Специалиста»
   src/      main.asm (раскладка ПЗУ), compat.asm (Монитор-2), kernel.asm (текст, клавиатура),
-            shell.asm (строки, переключение), apps.asm (программы), overview.asm, *.inc (генерируемые)
+            shell.asm (строки, переключение), apps.asm (Память, Магнитофон, Монитор), overview.asm,
+            debugger.asm (отложен, не подключён), *.inc (генерируемые)
   base/     spec_m2.rom — источник базовых 2 КБ (C000–C7FF)
   tools/    asm80.py (ассемблер 8080), dis80.py, mkfont.py, mkkeys.py, lower.py (строчные)
   build/    shell.rom (собирается)
 flipper/    FLIP (заморожен): spec_core.c, specialist_app.c, assets
 tools/      настольные тесты (Java): CpuTest, MachineTest, ShellCompat, ShellSmoke, ShellTiming,
-            ShellMemTest, ShellTapeTest, ShellDbgTest (отложен) (SPEC/ROM);
+            ShellMemTest, ShellTapeTest, ShellMonTest, ShellDbgTest (отложен) (SPEC/ROM);
             Z80FuseTest, ZexTest, ZxShot (ZX); flipper_core_test.c (FLIP)
 .github/workflows/  build.yml (SPEC), zx.yml (ZX), rom.yml (ROM), flipper.yml (FLIP, вручную)
 ```
