@@ -10,6 +10,13 @@ public final class AtariJniTest {
         if (!value) throw new AssertionError(reason);
     }
 
+    /** letters A on the text screen (screen code 21) */
+    private static int countA(AtariMachine m) {
+        int screen = m.word(0x58), n = 0;
+        for (int i = 0; i < 960; i++) if ((m.rawRead(screen + i) & 0x7F) == 0x21) n++;
+        return n;
+    }
+
     public static void main(String[] args) {
         check(NativeAtari.open("/tmp/atari-native-system", args[0], false), "open");
         short[] audio = new short[16384];
@@ -44,7 +51,25 @@ public final class AtariJniTest {
         check(state != null && state.length > 10000, "save");
         check(NativeAtari.load(state), "load");
         NativeAtari.reset();
+
+        // the app's machine layer: a key tapped between two frames still reaches the machine
+        AtariMachine m = new AtariMachine();
+        check(m.open("/tmp/atari-native-system", "", true), "AtariMachine open BASIC");
+        for (int i = 0; i < 220; i++) m.runFrame(audio);
+        int before = countA(m);
+        m.keyDown(0x3F); // A
+        m.keyUp(0x3F);
+        for (int i = 0; i < 10; i++) m.runFrame(audio);
+        int typed = countA(m) - before;
+        check(typed == 1, "tapped key typed exactly once (" + typed + ")");
+        m.setTrace(true);
+        m.run(audio, 3000, false);
+        long t2 = m.time();
+        m.stepInstruction();
+        check(m.time() > t2 && m.backInstructions(1) && m.time() == t2, "AtariMachine steps");
+        m.syncTrace();
+        check(m.trace.lastExec[m.pc()] > 0 || m.trace.lastExec[m.lastInstrPc()] > 0, "AtariMachine trace");
         NativeAtari.close();
-        System.out.println("ANDROID JNI BRIDGE OK (host JVM)");
+        System.out.println("ANDROID JNI BRIDGE + MACHINE LAYER OK (host JVM)");
     }
 }

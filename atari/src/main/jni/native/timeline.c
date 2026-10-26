@@ -394,11 +394,9 @@ void engine_trace_copy(long long *reads, long long *writes, long long *execs)
 	if (execs) memcpy(execs, ALEX_last_exec, sizeof(ALEX_last_exec));
 }
 
-/* Before saving the machine: a stop inside a frame is moved back to the start of that frame. */
-void timeline_to_frame_start(void)
+/* While stopped inside a frame, the machine itself is not in a savable state: a save stores the
+   start of that frame instead (without moving the current position). NULL otherwise. */
+const void *timeline_mid_frame_snapshot(void)
 {
-	if (!mid) return;
-	if (have_scratch) snap_restore(&scratch);
-	mid = 0;
-	pos_time = frame_base(cur_frame);
+	return mid && have_scratch ? scratch.state : NULL;
 }

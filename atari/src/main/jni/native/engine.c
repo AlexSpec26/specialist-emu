@@ -304,9 +304,13 @@ size_t engine_state_size(void) { return loaded ? 4 + engine_snapshot_size() : 0;
 
 int engine_save(void *data, size_t size) {
     if (!loaded || size < engine_state_size()) return 0;
-    timeline_to_frame_start();
     uint32_t magic = STATE_MAGIC;
     memcpy(data, &magic, 4);
+    const void *frame_start = timeline_mid_frame_snapshot();
+    if (frame_start) {
+        memcpy((char *)data + 4, frame_start, engine_snapshot_size());
+        return 1;
+    }
     return engine_snapshot_save((char *)data + 4, size - 4);
 }
 

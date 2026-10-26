@@ -35,7 +35,8 @@ public final class AtariMachine implements MemTrace.Mem {
     private final long[] status = new long[14];
     private short[] stereo = new short[16384];
 
-    private long time, instr, frames, lastStart;
+    private long time, instr, lastStart;
+    private volatile long frames;
     private int lastPc = -1;
     private boolean midFrame;
     private int beamLine, beamCycle;
@@ -43,6 +44,13 @@ public final class AtariMachine implements MemTrace.Mem {
 
     // keys (held counts, from the UI thread)
     private final int[] held = new int[KEY_COUNT];
+    /**
+     * Pressed since the current frame began: the machine reads the controls once per frame, so a
+     * tap shorter than a frame (or anything at slow speed) would otherwise be lost.
+     */
+    private final boolean[] latched = new boolean[KEY_COUNT];
+    /** frame number when each latch was set; a released key counts until two frames later */
+    private final long[] latchFrame = new long[KEY_COUNT];
     /** order in which the normal keys were pressed: the last one still held is the one typed */
     private final int[] pressOrder = new int[64];
     private int pressCounter;
@@ -250,6 +258,8 @@ public final class AtariMachine implements MemTrace.Mem {
     public synchronized void keyDown(int code) {
         if (code < 0 || code >= KEY_COUNT) return;
         held[code]++;
+        latched[code] = true;
+        latchFrame[code] = frames;
         if (code < 64) pressOrder[code] = ++pressCounter;
         pushInput();
     }
@@ -262,6 +272,7 @@ public final class AtariMachine implements MemTrace.Mem {
 
     public synchronized void releaseAllKeys() {
         java.util.Arrays.fill(held, 0);
+        java.util.Arrays.fill(latched, false);
         pushInput();
     }
 
@@ -273,40 +284,58 @@ public final class AtariMachine implements MemTrace.Mem {
     private synchronized void pushInput() {
         int key = -1, best = 0;
         for (int k = 0; k < 64; k++) {
-            if (held[k] > 0 && pressOrder[k] > best) {
+            if (down(k) && pressOrder[k] > best) {
                 best = pressOrder[k];
                 key = k;
             }
         }
-        boolean shift = held[SHIFT] > 0, ctrl = held[CTRL] > 0;
+        boolean shift = down(SHIFT), ctrl = down(CTRL);
         int akey = key;
         if (akey >= 0) {
             if (shift) akey |= 0x40;
             if (ctrl) akey |= 0x80;
         }
-        if (held[BREAK] > 0) akey = -5;
-        if (held[RESET] > 0) akey = -2;
+        if (down(BREAK)) akey = -5;
+        if (down(RESET)) akey = -2;
         int consol = 7;
-        if (held[START] > 0) consol &= ~1;
-        if (held[SELECT] > 0) consol &= ~2;
-        if (held[OPTION] > 0) consol &= ~4;
+        if (down(START)) consol &= ~1;
+        if (down(SELECT)) consol &= ~2;
+        if (down(OPTION)) consol &= ~4;
         int buttons = 0;
-        if (held[FIRE] > 0) buttons |= 1;
-        if (held[JOY_UP] > 0) buttons |= 1 << 4;
-        if (held[JOY_DOWN] > 0) buttons |= 1 << 5;
-        if (held[JOY_LEFT] > 0) buttons |= 1 << 6;
-        if (held[JOY_RIGHT] > 0) buttons |= 1 << 7;
+        if (down(FIRE)) buttons |= 1;
+        if (down(JOY_UP)) buttons |= 1 << 4;
+        if (down(JOY_DOWN)) buttons |= 1 << 5;
+        if (down(JOY_LEFT)) buttons |= 1 << 6;
+        if (down(JOY_RIGHT)) buttons |= 1 << 7;
         inAkey = akey;
         inShift = shift;
         inConsol = consol;
         inButtons = buttons;
     }
 
+    private boolean down(int code) {
+        return held[code] > 0 || latched[code];
+    }
+
     private volatile int inAkey = -1, inConsol = 7, inButtons;
     private volatile boolean inShift;
 
-    /** Hands the current controls to the engine (emulation thread, before running). */
+    /**
+     * Hands the current controls to the engine (emulation thread, before running). Once a frame
+     * has started with them, released keys stop counting as pressed.
+     */
     private void applyInput() {
+        synchronized (this) {
+            boolean changed = false;
+            for (int k = 0; k < KEY_COUNT; k++) {
+                // by then at least one whole frame has started with the key
+                if (latched[k] && held[k] == 0 && frames >= latchFrame[k] + 2) {
+                    latched[k] = false;
+                    changed = true;
+                }
+            }
+            if (changed) pushInput();
+        }
         NativeAtari.setInput(inAkey, inShift, inConsol, inButtons);
     }
 }

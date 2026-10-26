@@ -247,11 +247,13 @@ static void test_save_load(const char *demo) {
     assert(engine_open(DIR, demo, 0));
     input(AKEY_NONE, 0);
     frames(300);
-    engine_run(5000, 0, audio, 16384);       /* a save inside a frame stores its start */
+    unsigned long h = hash_ram();            /* at the start of a frame */
+    engine_run(5000, 0, audio, 16384);       /* a save inside a frame stores its start... */
+    long long t = engine_time();
     size_t n = engine_state_size();
     void *state = malloc(n);
     assert(n > 10000 && state && engine_save(state, n));
-    unsigned long h = hash_ram();
+    assert(engine_mid_frame() && engine_time() == t); /* ...and does not move the position */
     input(AKEY_NONE, 1 << 7);
     frames(20);
     assert(hash_ram() != h);
