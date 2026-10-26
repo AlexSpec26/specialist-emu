@@ -13,6 +13,9 @@ public final class NativeAtari {
 
     public static native void close();
 
+    /** the content started an Atari 5200 console instead of the 800XL */
+    public static native boolean is5200();
+
     /** Cold start of the current program. */
     public static native void reset();
 

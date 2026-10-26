@@ -44,7 +44,9 @@ public final class EmuActivity extends Activity implements MainView.Host {
     private static final int REQ_OS = 6;
     private static final int REQ_BASIC = 7;
     private static final int MAX_FILE = 32 * 1024 * 1024;
-    private static final String[] TYPES = {"xex", "com", "exe", "atr", "xfd", "car", "cas", "atx", "dcm"};
+    /** programs, disks, cartridges (with CART header or raw: rom, bin; a52 = Atari 5200), tapes */
+    private static final String[] TYPES = {"xex", "com", "exe", "atr", "xfd", "atx", "dcm", "car", "rom", "bin", "a52", "cas"};
+    private static final String TYPES_TEXT = ".xex .com .exe .atr .xfd .atx .dcm .car .rom .bin .a52 .cas";
 
     private EmuThread emu;
     private AtariMachine machine;
@@ -254,7 +256,8 @@ public final class EmuActivity extends Activity implements MainView.Host {
     private boolean openOnEmu(String prog) {
         try {
             if (machine.open(systemDir().getAbsolutePath(), contentPath(prog), basicFor(prog))) return true;
-            ui.post(() -> toast("Не удалось запустить «" + (prog.isEmpty() ? "BASIC" : prog) + "»"));
+            ui.post(() -> toast("Не удалось запустить «" + (prog.isEmpty() ? "BASIC" : prog) + "»: ядро не узнало "
+                    + "формат файла. Картридж без заголовка должен называться .rom/.bin (Atari 800/XL) или .a52 (5200)."));
         } catch (IOException e) {
             ui.post(() -> toast(e.getMessage()));
         }
@@ -372,8 +375,8 @@ public final class EmuActivity extends Activity implements MainView.Host {
     private void setProgram(String name) {
         program = name == null ? "" : name;
         view.config = ControlConfig.load(prefs, program);
-        view.title = progTitle();
-        view.map.basicOn = basicFor(program);
+        view.title = progTitle() + (machine.is5200() ? " · Atari 5200" : "");
+        view.map.basicOn = basicFor(program) && !machine.is5200();
         view.configChanged();
     }
 
@@ -441,7 +444,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
         List<Runnable> actions = new ArrayList<>();
         items.add("🕹  Игры…");
         actions.add(this::showGames);
-        items.add("📂  Открыть файл (.xex .atr .car .cas)…");
+        items.add("📂  Открыть файл (.xex .atr .car .rom .a52 .cas)…");
         actions.add(this::pickProgram);
         items.add("📚  Мои программы…");
         actions.add(this::showLibrary);
@@ -781,7 +784,9 @@ public final class EmuActivity extends Activity implements MainView.Host {
         show(new AlertDialog.Builder(this)
                 .setTitle("Справка")
                 .setMessage("Программы: «Открыть файл» — .xex .com .exe (программы), .atr .xfd .atx .dcm (диски), "
-                        + ".car (картриджи), .cas (кассеты). Файл сохраняется в «Мои программы». Многим играм "
+                        + ".car, .rom, .bin (картриджи), .a52 (картриджи приставки 5200: эмулятор сам включит 5200, "
+                        + "START/SELECT/OPTION — её START/PAUSE/RESET, цифры — её клавиатура), .cas (кассеты). "
+                        + "Игры для Atari 2600 (.a26) — другая машина, не запускаются. Файл сохраняется в «Мои программы». Многим играм "
                         + "после загрузки нужно нажать START.\n\n"
                         + "Джойстик и кнопки: по умолчанию — джойстик Atari и FIRE, START, пробел, RETURN. "
                         + "«Настроить кнопки» — назначить любую клавишу или готовую раскладку; для каждой программы "
@@ -1189,15 +1194,40 @@ public final class EmuActivity extends Activity implements MainView.Host {
         } else if (requestCode == REQ_PROGRAM) {
             try {
                 String name = displayName(uri);
-                if (!Arrays.asList(TYPES).contains(ext(name))) {
-                    toast(name + ": нужен файл .xex .com .exe .atr .xfd .atx .dcm .car или .cas");
+                String e = ext(name);
+                if (e.equals("a26")) {
+                    toast(name + ": это игра для Atari 2600 (VCS) — другой машины; этот эмулятор её не запускает");
                     return;
                 }
-                writeFile(new File(programsDir(), name), readUri(uri));
-                runProgram(name);
+                if (!Arrays.asList(TYPES).contains(e)) {
+                    toast(name + ": нужен файл " + TYPES_TEXT);
+                    return;
+                }
+                byte[] data = readUri(uri);
+                if ((e.equals("rom") || e.equals("bin")) && AtariMachine.looksLike2600(data)) {
+                    show(new AlertDialog.Builder(this)
+                            .setTitle(name)
+                            .setMessage("Похоже, это картридж Atari 2600 (VCS): " + data.length + " байт, адреса "
+                                    + "переходов — как у 2600. Это другая приставка, этот эмулятор её не запускает.\n\n"
+                                    + "Для Atari 800/XL/XE ищите версию игры в формате .xex, .atr, .car или .rom "
+                                    + "(обычно 8 или 16 КБ), для приставки 5200 — .a52.")
+                            .setPositiveButton("Всё равно открыть", (d, w) -> importProgram(name, data))
+                            .setNegativeButton("Отмена", null));
+                    return;
+                }
+                importProgram(name, data);
             } catch (IOException e) {
                 toast("Ошибка: " + e.getMessage());
             }
+        }
+    }
+
+    private void importProgram(String name, byte[] data) {
+        try {
+            writeFile(new File(programsDir(), name), data);
+            runProgram(name);
+        } catch (IOException e) {
+            toast("Ошибка: " + e.getMessage());
         }
     }
 

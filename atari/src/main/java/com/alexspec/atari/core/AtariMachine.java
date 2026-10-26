@@ -57,9 +57,23 @@ public final class AtariMachine implements MemTrace.Mem {
 
     // ------------------------------------------------------------------ machine
 
+    /**
+     * A raw image that is an Atari 2600 cartridge rather than an Atari 8-bit one. 800/XL carts are
+     * 4 KB or more and keep 0 in the byte before their start vector (BFFC); 5200 carts start in
+     * 4000-BFFF. 2600 games are 2 KB, or 4 KB with reset and interrupt vectors pointing into Fxxx.
+     */
+    public static boolean looksLike2600(byte[] d) {
+        if (d.length == 2048) return true;
+        if (d.length != 4096) return false;
+        int reset = (d[0xFFC] & 0xFF) | (d[0xFFD] & 0xFF) << 8, irq = (d[0xFFE] & 0xFF) | (d[0xFFF] & 0xFF) << 8;
+        return (reset & 0xF000) == 0xF000 && (irq & 0xF000) == 0xF000;
+    }
+
+
     /** Starts a fresh machine with a program, disk or cartridge ("" = BASIC). */
     public boolean open(String systemDir, String content, boolean basic) {
         open = NativeAtari.open(systemDir, content == null ? "" : content, basic);
+        console5200 = open && NativeAtari.is5200();
         NativeAtari.trace(traceOn);
         refresh();
         return open;
@@ -67,6 +81,13 @@ public final class AtariMachine implements MemTrace.Mem {
 
     public boolean isOpen() {
         return open;
+    }
+
+    private volatile boolean console5200;
+
+    /** running an Atari 5200 console (a 5200 cartridge was opened) */
+    public boolean is5200() {
+        return console5200;
     }
 
     public void hardReset() {

@@ -70,6 +70,14 @@ public final class AtariJniTest {
         m.syncTrace();
         check(m.trace.lastExec[m.pc()] > 0 || m.trace.lastExec[m.lastInstrPc()] > 0, "AtariMachine trace");
         NativeAtari.close();
+
+        // Atari 2600 images are recognised before opening; Atari 8-bit and 5200 ones are not flagged
+        byte[] vcs = new byte[4096];
+        vcs[0xFFC] = 0x00; vcs[0xFFD] = (byte) 0xF0; vcs[0xFFE] = 0x00; vcs[0xFFF] = (byte) 0xF0;
+        byte[] a800 = new byte[4096];
+        a800[0xFFA] = 0x00; a800[0xFFB] = (byte) 0xB0; a800[0xFFD] = 0x04; a800[0xFFE] = 0x00; a800[0xFFF] = (byte) 0xB0;
+        check(AtariMachine.looksLike2600(vcs) && AtariMachine.looksLike2600(new byte[2048]), "2600 recognised");
+        check(!AtariMachine.looksLike2600(a800) && !AtariMachine.looksLike2600(new byte[8192]), "8-bit not flagged");
         System.out.println("ANDROID JNI BRIDGE + MACHINE LAYER OK (host JVM)");
     }
 }
