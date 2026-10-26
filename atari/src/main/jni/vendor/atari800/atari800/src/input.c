@@ -434,13 +434,30 @@ static UBYTE mouse_step(void)
 	return r;
 }
 
+/* specialist-emu: these were static locals of INPUT_Frame. They carry key and joystick
+   state from frame to frame but are not in save states, so replaying a frame from a
+   snapshot needs them saved and restored too (INPUT_AlexGetState / INPUT_AlexSetState). */
+static int last_key_code = AKEY_NONE;
+static int last_key_break = 0;
+static UBYTE last_stick[4] = {INPUT_STICK_CENTRE, INPUT_STICK_CENTRE, INPUT_STICK_CENTRE, INPUT_STICK_CENTRE};
+static int last_mouse_buttons = 0;
+
+void INPUT_AlexGetState(int out[8])
+{
+	out[0] = last_key_code; out[1] = last_key_break; out[2] = last_mouse_buttons;
+	out[3] = last_stick[0]; out[4] = last_stick[1]; out[5] = last_stick[2]; out[6] = last_stick[3];
+	out[7] = 0;
+}
+
+void INPUT_AlexSetState(const int in[8])
+{
+	last_key_code = in[0]; last_key_break = in[1]; last_mouse_buttons = in[2];
+	last_stick[0] = (UBYTE) in[3]; last_stick[1] = (UBYTE) in[4]; last_stick[2] = (UBYTE) in[5]; last_stick[3] = (UBYTE) in[6];
+}
+
 void INPUT_Frame(void)
 {
 	int i;
-	static int last_key_code = AKEY_NONE;
-	static int last_key_break = 0;
-	static UBYTE last_stick[4] = {INPUT_STICK_CENTRE, INPUT_STICK_CENTRE, INPUT_STICK_CENTRE, INPUT_STICK_CENTRE};
-	static int last_mouse_buttons = 0;
 
 	scanline_counter = 10000;	/* do nothing in INPUT_Scanline() */
 

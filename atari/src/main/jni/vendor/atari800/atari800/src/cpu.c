@@ -84,6 +84,11 @@
 #include "libatari800/cpu_crash.h"
 #endif
 
+#ifdef ALEXSPEC_HOOKS
+/* specialist-emu: memory-access trace and instruction hook (atari/src/main/jni/native) */
+#include "alexspec_hooks.h"
+#endif
+
 /* For Atari Basic loader */
 void (*CPU_rts_handler)(void) = NULL;
 
@@ -197,6 +202,46 @@ static int service_pokey_irq;
 #define RMW_GetByte(x, addr) x = MEMORY_GetByte(addr);
 #endif /* NEW_CYCLE_EXACT */
 
+#ifdef ALEXSPEC_HOOKS
+/* specialist-emu: every CPU memory access goes through the trace (see alexspec_hooks.h):
+   code fetches mark "executed", data accesses "read"/"written". Only the CPU is traced;
+   ANTIC's display DMA reads MEMORY_mem directly and is not shown. */
+#undef MEMORY_dGetByte
+#undef MEMORY_dPutByte
+#undef MEMORY_dGetWord
+#undef MEMORY_dGetWordAligned
+#undef MEMORY_GetByte
+#undef MEMORY_PutByte
+#define MEMORY_dGetByte(x)          ALEX_read((UWORD) (x))
+#define MEMORY_dPutByte(x, y)       ALEX_write((UWORD) (x), (UBYTE) (y))
+#define MEMORY_dGetWord(x)          ALEX_read_word((UWORD) (x))
+#define MEMORY_dGetWordAligned(x)   ALEX_read_word((UWORD) (x))
+#define MEMORY_GetByte(addr)        ALEX_get((UWORD) (addr))
+#define MEMORY_PutByte(addr, byte)  ALEX_put((UWORD) (addr), (UBYTE) (byte))
+#undef GET_CODE_BYTE
+#undef PEEK_CODE_BYTE
+#undef PEEK_CODE_WORD
+#define GET_CODE_BYTE()             ALEX_code(PC++)
+#define PEEK_CODE_BYTE()            ALEX_code(PC)
+#define PEEK_CODE_WORD()            ALEX_code_word(PC)
+#ifdef NEW_CYCLE_EXACT
+#undef RMW_GetByte
+#define RMW_GetByte(x, addr) \
+	do { \
+		ALEX_MARK_READ(addr); \
+		if (MEMORY_attrib[addr] == MEMORY_HARDWARE) { \
+			x = MEMORY_HwGetByte(addr, FALSE); \
+			if ((addr & 0xed00) == 0xc000) { \
+				ANTIC_xpos--; \
+				MEMORY_HwPutByte(addr, x); \
+				ANTIC_xpos++; \
+			} \
+		} else \
+			x = MEMORY_mem[addr]; \
+	} while (0)
+#endif
+#endif /* ALEXSPEC_HOOKS */
+
 /* 6502 registers. */
 UWORD CPU_regPC;
 UBYTE CPU_regA;
@@ -217,6 +262,14 @@ static UBYTE V;                 /* non-zero => V flag set */
 static UBYTE Z;					/* zero     => Z flag set */
 static UBYTE C;					/* must be 0 or 1 */
 /* B, D, I are always in CPU_regP */
+
+#ifdef ALEXSPEC_HOOKS
+#ifndef NO_V_FLAG_VARIABLE
+#define ALEX_FLAGS ((N & 0x80) + (V ? 0x40 : 0) + (CPU_regP & 0x3c) + ((Z == 0) ? 0x02 : 0) + C)
+#else
+#define ALEX_FLAGS ((N & 0x80) + (CPU_regP & 0x7c) + ((Z == 0) ? 0x02 : 0) + C)
+#endif
+#endif
 
 void CPU_GetStatus(void)
 {
@@ -678,9 +731,9 @@ void CPU_GO(int limit)
 
 #ifdef MONITOR_BREAK
 		CPU_remember_PC[CPU_remember_PC_curpos] = GET_PC();
-		CPU_remember_op[CPU_remember_PC_curpos][0] = MEMORY_dGetByte(GET_PC());
-		CPU_remember_op[CPU_remember_PC_curpos][1] = MEMORY_dGetByte(GET_PC()+1);
-		CPU_remember_op[CPU_remember_PC_curpos][2] = MEMORY_dGetByte(GET_PC()+2);
+		CPU_remember_op[CPU_remember_PC_curpos][0] = MEMORY_mem[GET_PC()];
+		CPU_remember_op[CPU_remember_PC_curpos][1] = MEMORY_mem[(UWORD) (GET_PC()+1)];
+		CPU_remember_op[CPU_remember_PC_curpos][2] = MEMORY_mem[(UWORD) (GET_PC()+2)];
 #ifdef NEW_CYCLE_EXACT
 		if (ANTIC_DRAWING_SCREEN)
 			CPU_remember_xpos[CPU_remember_PC_curpos] = ANTIC_cpu2antic_ptr[ANTIC_xpos] + (ANTIC_ypos << 8);
@@ -696,6 +749,11 @@ void CPU_GO(int limit)
 
 #if defined(WRAP_64K) && !defined(PC_PTR)
 		MEMORY_mem[0x10000] = MEMORY_mem[0];
+#endif
+
+#ifdef ALEXSPEC_HOOKS
+		if (ALEX_hooks)
+			ALEX_instruction(GET_PC(), A, X, Y, S, ALEX_FLAGS);
 #endif
 
 		insn = GET_CODE_BYTE();
