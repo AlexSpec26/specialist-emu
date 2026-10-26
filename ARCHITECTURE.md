@@ -88,3 +88,19 @@ tools/      настольные тесты (Java): CpuTest, MachineTest, ShellC
 - `.github/workflows/atari.yml` — только Atari + его тесты; signed prerelease atari-build-N,
   ключ в стандартных SIGNING_* secrets. PR не подписывает и не выпускает APK.
 - Timing пока на границах инструкций; DMA/RDY и недокументированные opcodes — следующие этапы.
+
+## Atari playable runtime (ATARI-002)
+- Native Atari800 7.0.0/libretro pinned to 4e7fbc7, full source under atari/src/main/jni/vendor.
+- Android.mk + NDK 27.2.12479018 produce arm64-v8a/x86_64 libatari_engine.so with 16K pages.
+  native/engine.c implements libretro environment/video/audio/input/state callbacks;
+  native/jni.c is the Android bridge, also tested on host JVM.
+- AtariRunner owns native calls under a process-wide owner monitor on one worker thread;
+  renders RGB565→ARGB frames, paces stereo 44100 Hz audio, pauses on lifecycle/dialogs.
+- PlayView provides screen, multitouch joystick/fire/console/keyboard and physical inputs.
+  AtariActivity handles SAF imports/library/settings. InspectorActivity preserves Java CPU.
+- Native source + notices are GPL-2.0-or-later in the Atari module; freely redistributable
+  Altirra replacement firmware is compiled into the core. No proprietary Atari firmware.
+- Auto/quick saves: AtomicFile, profile ID (core/game/firmware/BASIC), payload digest.
+  Imported disk filenames retain original content ID so disk writes do not change profile.
+- tools/AtariNativeTest.c exercises actual runtime under ASAN; AtariJniTest tests the JNI API.
+  package_source.py creates corresponding source with standalone :atari Gradle settings.

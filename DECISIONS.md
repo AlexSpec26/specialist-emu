@@ -174,3 +174,16 @@
   исполнение; ни игры, ни полный Atari boot пока не заявляются. ROM не распространяются.
 - Build: отдельный workflow и atari-build-N prerelease; общий ключ только в GitHub Actions.
 - Related backlog IDs: ATARI-001. Суффикс ATARI исключает коллизию с ADR-020 в SPEC PR #2.
+
+### ADR-021-ATARI — Игровой runtime на Atari800 (2026-10-26)
+- Status: Accepted (реализация поручения ATARI-002, review PR #3)
+- Context: владелец просит продолжать до полноценного игрового APK, не только CPU inspector.
+- Options: самостоятельно реализовать ANTIC/GTIA/POKEY/SIO; интегрировать существующее ядро.
+- Decision: Atari800 7.0.0/libretro GPL-2.0-or-later по pinned revision; исходники в Atari-модуле,
+  corresponding source прилагается к каждому APK, лицензии сохранены в источниках и приложении.
+  Java M6502 остаётся отдельным учебным инспектором, не игровым engine.
+- Why: проверенное ядро даёт настоящие видео/звук/игровые форматы; native/JNI тесты подтверждают
+  actual boot, input, sound, game media и save-state вместо заявления о готовности по сборке.
+- Consequences: NDK и 64-bit ABI, лицензия GPL только Atari-модуля; другие продукты не меняются.
+  Встроены только свободные Altirra replacements и оригинальная CC0 demo, не original Atari ROM.
+- Related: ATARI-002; дополняет ADR-020-ATARI, не отменяет проверенное Java ядро.

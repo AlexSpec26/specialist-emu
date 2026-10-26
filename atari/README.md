@@ -2,6 +2,9 @@
 
 Отдельное приложение `com.alexspec.atari`. Ветка `feature/atari-65xe`, PR #3.
 
+[Скачать подписанный игровой APK, build-5](https://github.com/AlexSpec26/specialist-emu/releases/download/atari-build-5/atari-65xe-5.apk)
+· [исходники этой сборки](https://github.com/AlexSpec26/specialist-emu/releases/download/atari-build-5/atari-source-5.tar.gz).
+
 ## Что работает
 - Игровой движок Atari800 7.0.0 через libretro: 6502/SALLY, ANTIC, GTIA, POKEY,
   DMA, PAL, XL/XE 64 КБ. Видео 336×240 с отображением 4:3, звук stereo 44.1 kHz.

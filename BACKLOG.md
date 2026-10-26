@@ -271,7 +271,7 @@
 - Last updated: 2026-10-26, ChatGPT-Codex
 
 ### ATARI-002 — Игровой APK с видео, звуком и управлением
-- Status: In progress
+- Status: Review
 - Priority: P1 (user-confirmed)
 - Origin: 2026-10-26, user: «продолжай до получения полноценного apk».
 - Desired outcome: отдельное Android-приложение запускает Atari BASIC и программы/игры,
@@ -281,4 +281,12 @@
 - Acceptance criteria: реальные native headless тесты boot/video/audio/input/XEX/ATR/CAR/save-state;
   сборка Android и подписанный APK с corresponding source в Releases; на устройстве — проверка владельцем.
 - Constraints: не менять app/zx/shell/minimon, без merge; оригинальные Atari ROM и чужие игры не распространять.
-- Validation: pending.
+- Validation: native BASIC boot/PRINT 123, XEX + joystick + POKEY + ANTIC/GTIA,
+  save/restore/replay RAM, ATR boot/SIO, CAR INIT/RUN, reload/error tests — passed под ASAN.
+  Host JVM JNI bridge — passed. Java Klaus/binary/BCD tests — passed.
+  GitHub PR CI 40306954620 и signed build 40306947351 — success.
+- APK: https://github.com/AlexSpec26/specialist-emu/releases/download/atari-build-5/atari-65xe-5.apk
+- Corresponding source: https://github.com/AlexSpec26/specialist-emu/releases/download/atari-build-5/atari-source-5.tar.gz
+- Limitations: физический телефон ещё не проверен; не заявляется совместимость со всеми играми,
+  защищённые ATX/реальные CAS не проверены; только arm64-v8a/x86_64; нет rewind/history.
+  Дисковые записи ATR не откатываются снимком RAM. Требуется review владельца; merge не выполнен.
