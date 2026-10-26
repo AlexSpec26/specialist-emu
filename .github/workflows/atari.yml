@@ -1,0 +1,82 @@
+name: Atari 65XE checks and APK
+
+on:
+  push:
+    branches: [ main, feature/atari-65xe ]
+    paths: [ 'atari/**', 'tools/AtariCoreTest.java', '.github/workflows/atari.yml' ]
+  pull_request:
+    paths: [ 'atari/**', 'tools/AtariCoreTest.java', '.github/workflows/atari.yml' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: CPU, memory and Klaus 6502 conformance tests
+        run: |
+          mkdir -p /tmp/atari-core
+          javac -d /tmp/atari-core atari/src/main/java/com/alexspec/atari/core/*.java tools/AtariCoreTest.java
+          git clone https://github.com/Klaus2m5/6502_65C02_functional_tests /tmp/klaus
+          git -C /tmp/klaus checkout 7954e2dbb49c469ea286070bf46cdd71aeb29e4b
+          java -cp /tmp/atari-core AtariCoreTest /tmp/klaus/bin_files/6502_functional_test.bin
+      - name: Compile development APK
+        run: gradle --no-daemon :atari:assembleDebug
+      - name: Signing key from secrets
+        if: github.event_name != 'pull_request'
+        env:
+          KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+          STORE_PW: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          KEY_PW: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$STORE_PW" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PW" ]; then
+            echo "::error::Signing secrets SIGNING_* are missing (ADR-014)"; exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          keytool -list -keystore "$RUNNER_TEMP/release.keystore" -storepass "$STORE_PW" -alias "$KEY_ALIAS" > /dev/null \
+            || { echo "::error::Signing secrets do not open the key (check SIGNING_* values)"; exit 1; }
+          echo "SIGNING_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          echo "SIGNING_STORE_PASSWORD=$STORE_PW" >> "$GITHUB_ENV"
+          echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "SIGNING_KEY_PASSWORD=$KEY_PW" >> "$GITHUB_ENV"
+          echo "::notice::Using the signing key from GitHub secrets"
+
+
+      - name: Signed Atari APK
+        if: github.event_name != 'pull_request'
+        run: |
+          gradle --no-daemon :atari:assembleRelease
+          cp atari/build/outputs/apk/release/atari-release.apk atari-65xe-${{ github.run_number }}.apk
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: atari-65xe-apk-${{ github.run_number }}
+          path: atari-65xe-${{ github.run_number }}.apk
+      - name: Publish Atari development release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: atari-build-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: Atari 65XE — CPU inspector, build ${{ github.run_number }}
+          files: atari-65xe-${{ github.run_number }}.apk
+          prerelease: true
+          make_latest: false
+          body: |
+            Разработка Atari 65XE: документированные инструкции 6502, загрузка OS/BASIC ROM,
+            регистры и пошаговый просмотр памяти. ANTIC/GTIA/POKEY пока не реализованы:
+            игры и видео Atari ещё не работают. ROM в комплект не входят.
+            Установите atari-65xe-${{ github.run_number }}.apk; это отдельное приложение.

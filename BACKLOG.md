@@ -247,3 +247,21 @@
 ### OPS-003 — Сборка каждого продукта только от своих файлов, свои релизы
 - Status: Done (2026-10-25): `build.yml` (app → `build-N`), `zx.yml` (zx → `zx-build-N`),
   `rom.yml` (shell → `rom-build-N`), флиппер — только вручную. Документы не запускают сборок.
+
+---------------------------------------------------------------------------------------------
+## ATARI — отдельный эмулятор Atari 65XE (`atari/`)
+
+### ATARI-001 — Процессор 6502, загрузка ПЗУ и пошаговый инспектор
+- Status: In progress
+- Priority: P1 (proposed)
+- Origin: user, 2026-10-26: «посмотри в репозитории, можешь продолжить работу в ветке про атари?»
+- Why / user problem: продолжить каркас из PR #3; без CPU машина не исполняет код.
+- Desired outcome: первый этап roadmap atari/README — документированные инструкции NMOS 6502,
+  десятичная арифметика, прерывания, такты; подключение к памяти и загрузке OS/BASIC ROM.
+- Acceptance criteria: тест Klaus 6502 и локальные тесты арифметики/таймингов/прерываний/памяти;
+  Android APK с загрузкой ПЗУ и шагами; отдельные сборки Atari. Игры пока не заявляются.
+- Constraints: не менять app/, zx/, shell/, minimon/; без merge в main; ROM не распространяются.
+- Implementation: продолжение feature/atari-65xe от 88e6750, PR #3.
+- Validation: not yet tested.
+- Next: ANTIC/GTIA/POKEY, затем XEX/ATR/CAR и управление — согласно atari/README.
+- Last updated: 2026-10-26, ChatGPT-Codex
