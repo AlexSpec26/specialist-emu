@@ -11,19 +11,29 @@ zx/         ZX: Android-приложение ZX Spectrum 48K (com.alexspec.zx)
             TapeDecoder, Z80Dis
   *.java    как в app + Games (игры в комплекте), Speed, ZxKeys
   assets/   48k.rom, games/*.tap|tzx + LICENSE.txt
+atari/      ATARI: Android-приложение Atari 65XE (com.alexspec.atari), подробно — atari/README.md
+  java/     AtariActivity (меню, импорт), PlayView (экран, джойстик, клавиатура),
+            AtariRunner (поток эмуляции, звук, снимки), NativeAtari (вызовы ядра)
+  jni/      native/engine.c (libretro-фронтенд), native/jni.c (мост), vendor/atari800 (ядро)
 shell/      ROM: оболочка в ПЗУ «Специалиста»
-  src/      main.asm (раскладка ПЗУ), compat.asm (Монитор-2), kernel.asm (текст, клавиатура),
-            shell.asm (строки, переключение), apps.asm (Память, Магнитофон), debugger.asm,
-            overview.asm, memdesc/scroll/hexin/gap_*.asm (лежат в пустотах ПЗУ, ADR-017),
-            monitor.asm (отложен, не подключён), *.inc (генерируемые)
+  src/      main.asm (оболочка) и devel.asm (среда разработки, ADR-019) — верхние файлы;
+            common.asm, compat1–4.asm (Монитор-2), kernel.asm (текст, клавиатура),
+            shell.asm (строки, переключение), apps.asm (Память, Магнитофон, Отладка),
+            dbgcore/dbgui.asm, tapecore.asm, dis.asm, overview.asm,
+            memdesc/scroll/hexin/gap_*.asm (лежат в пустотах ПЗУ, ADR-017),
+            monitor.asm (отложен), devmon.asm (черновик), *.inc (генерируемые)
   base/     spec_m2.rom — источник базовых 2 КБ (C000–C7FF)
   tools/    asm80.py (ассемблер 8080), dis80.py, mkfont.py, mkkeys.py, lower.py (строчные)
   build/    shell.rom (собирается)
 flipper/    FLIP (заморожен): spec_core.c, specialist_app.c, assets
 tools/      настольные тесты (Java): CpuTest, MachineTest, ShellCompat, ShellSmoke, ShellTiming,
             ShellMemTest, ShellTapeTest, ShellDbgTest, ShellMonTest (отложен) (SPEC/ROM);
-            Z80FuseTest, ZexTest, ZxShot (ZX); flipper_core_test.c (FLIP)
-.github/workflows/  build.yml (SPEC), zx.yml (ZX), rom.yml (ROM), flipper.yml (FLIP, вручную)
+            Z80FuseTest, ZexTest, ZxShot (ZX); AtariNativeTest.c, AtariJniTest (ATARI);
+            flipper_core_test.c (FLIP)
+minimon/    учебный минимальный монитор «Специалиста» по шагам (ROM-MINI)
+docs/       i8080-tutorial.html (DOC-001), handoffs/ (старые передачи)
+.github/workflows/  build.yml (SPEC), zx.yml (ZX), atari.yml (ATARI), rom.yml (ROM),
+                    flipper.yml (FLIP, вручную)
 ```
 
 ## Сборки и релизы
@@ -31,6 +41,7 @@ tools/      настольные тесты (Java): CpuTest, MachineTest, ShellC
 | --- | --- | --- | --- |
 | SPEC | `app/**`, общие gradle-файлы, `tools/CpuTest.java`, `tools/MachineTest.java` | `build-N` | `specialist-N.apk` |
 | ZX | `zx/**`, `tools/ZexTest.java`, `tools/Z80FuseTest.java`, `tools/ZxShot.java` | `zx-build-N` | `zx-spectrum-N.apk` |
+| ATARI | `atari/**`, общие gradle-файлы, `tools/Atari*` | `atari-build-N` | `atari-65xe-N.apk` + `atari-source-N.tar.gz` |
 | ROM | `shell/**`, `tools/Shell*.java` | `rom-build-N` | `shell-N.rom` |
 | FLIP | только вручную (workflow_dispatch) | `flipper-N` | `.fap` |
 
@@ -77,30 +88,16 @@ tools/      настольные тесты (Java): CpuTest, MachineTest, ShellC
 - SPEC/ZX ядро: `javac` ядра + нужный тест из `tools/` (см. заголовки файлов).
 - Android: `gradle :app:assembleRelease`, `gradle :zx:assembleRelease` (в CI, Gradle 8.11.1, JDK 17).
 
-## Atari 65XE (ATARI-001)
-- `atari/` — отдельное приложение, подключено исходным каркасом в settings.gradle.
-- `core/M6502` и `CpuBus` — чистая Java: документированный NMOS 6502 с instruction timing.
-  `Atari65XE` — RAM, 16K OS, 8K BASIC, self-test overlay, PIA DDR/control/PORTB.
-  ANTIC/GTIA/POKEY ещё не реализованы; массив I/O — placeholder вне PIA banking.
-- `AtariActivity` — SAF loading собственных ROM, регистры, память, шаги; один worker поток,
-  неизменяемый текст состояния передаётся в UI. ROM хранятся в приватной папке приложения.
-- `tools/AtariCoreTest.java` — локальные и внешние Klaus conformance tests.
-- `.github/workflows/atari.yml` — только Atari + его тесты; signed prerelease atari-build-N,
-  ключ в стандартных SIGNING_* secrets. PR не подписывает и не выпускает APK.
-- Timing пока на границах инструкций; DMA/RDY и недокументированные opcodes — следующие этапы.
-
-## Atari playable runtime (ATARI-002)
-- Native Atari800 7.0.0/libretro pinned to 4e7fbc7, full source under atari/src/main/jni/vendor.
-- Android.mk + NDK 27.2.12479018 produce arm64-v8a/x86_64 libatari_engine.so with 16K pages.
-  native/engine.c implements libretro environment/video/audio/input/state callbacks;
-  native/jni.c is the Android bridge, also tested on host JVM.
-- AtariRunner owns native calls under a process-wide owner monitor on one worker thread;
-  renders RGB565→ARGB frames, paces stereo 44100 Hz audio, pauses on lifecycle/dialogs.
-- PlayView provides screen, multitouch joystick/fire/console/keyboard and physical inputs.
-  AtariActivity handles SAF imports/library/settings. InspectorActivity preserves Java CPU.
-- Native source + notices are GPL-2.0-or-later in the Atari module; freely redistributable
-  Altirra replacement firmware is compiled into the core. No proprietary Atari firmware.
-- Auto/quick saves: AtomicFile, profile ID (core/game/firmware/BASIC), payload digest.
-  Imported disk filenames retain original content ID so disk writes do not change profile.
-- tools/AtariNativeTest.c exercises actual runtime under ASAN; AtariJniTest tests the JNI API.
-  package_source.py creates corresponding source with standalone :atari Gradle settings.
+## Atari 65XE
+- Ядро Atari800 7.0.0 / libretro, зафиксированная версия 4e7fbc7, исходники целиком в
+  `atari/src/main/jni/vendor/atari800` (три локальные правки — `atari/THIRD_PARTY.md`).
+  NDK 27.2 собирает `libatari_engine.so` для arm64-v8a и x86_64 (страницы 16 КБ).
+- `engine.c` — libretro-фронтенд: машина зафиксирована (800XL 64 КБ, PAL, 336×240,
+  BASIC по настройке), RGB565 → ARGB, звук 44,1 кГц стерео, джойстик и клавиши кодами libretro.
+  Машина в ядре одна на процесс, поэтому все вызовы — из `AtariRunner` под монитором
+  `NativeAtari.class`; новый поток (после пересоздания экрана) забирает ядро у старого.
+- Снимки: `states/<профиль>-quick|auto.state`, профиль = SHA-256 от версии ядра, файла
+  программы, ПЗУ и настройки BASIC; запись через AtomicFile, проверка хеша при чтении.
+- Тесты на ПК: `tools/AtariNativeTest.c` (настоящее ядро; в CI под ASAN), `tools/AtariJniTest.java`.
+- Лицензия модуля — GPL-2.0-or-later; в каждый релиз кладётся архив исходников
+  (`atari/tools/package_source.py`), уведомления — `assets/licenses.txt` (`make_notices.py`).

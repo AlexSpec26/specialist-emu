@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 output = Path(sys.argv[1]).resolve()
-paths = ['atari', 'tools/AtariCoreTest.java', 'tools/AtariNativeTest.c', 'tools/AtariJniTest.java',
+paths = ['atari', 'tools/AtariNativeTest.c', 'tools/AtariJniTest.java',
          'build.gradle', 'settings.gradle', 'gradle.properties', '.github/workflows/atari.yml']
 archive = subprocess.check_output(['git', 'archive', '--format=tar', 'HEAD', *paths])
 with tempfile.TemporaryDirectory() as temporary:
