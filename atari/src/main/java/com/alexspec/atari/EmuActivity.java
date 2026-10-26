@@ -1203,19 +1203,19 @@ public final class EmuActivity extends Activity implements MainView.Host {
                     toast(name + ": нужен файл " + TYPES_TEXT);
                     return;
                 }
-                byte[] data = readUri(uri);
-                if ((e.equals("rom") || e.equals("bin")) && AtariMachine.looksLike2600(data)) {
+                byte[] bytes = readUri(uri);
+                if ((e.equals("rom") || e.equals("bin")) && AtariMachine.looksLike2600(bytes)) {
                     show(new AlertDialog.Builder(this)
                             .setTitle(name)
-                            .setMessage("Похоже, это картридж Atari 2600 (VCS): " + data.length + " байт, адреса "
+                            .setMessage("Похоже, это картридж Atari 2600 (VCS): " + bytes.length + " байт, адреса "
                                     + "переходов — как у 2600. Это другая приставка, этот эмулятор её не запускает.\n\n"
                                     + "Для Atari 800/XL/XE ищите версию игры в формате .xex, .atr, .car или .rom "
                                     + "(обычно 8 или 16 КБ), для приставки 5200 — .a52.")
-                            .setPositiveButton("Всё равно открыть", (d, w) -> importProgram(name, data))
+                            .setPositiveButton("Всё равно открыть", (d, w) -> importProgram(name, bytes))
                             .setNegativeButton("Отмена", null));
                     return;
                 }
-                importProgram(name, data);
+                importProgram(name, bytes);
             } catch (IOException e) {
                 toast("Ошибка: " + e.getMessage());
             }
