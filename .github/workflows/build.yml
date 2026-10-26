@@ -54,7 +54,7 @@ jobs:
           echo "::notice::Using the signing key from GitHub secrets"
 
       - name: Build APK
-        run: gradle --no-daemon :app:assembleRelease
+        run: gradle --no-daemon :app:testReleaseUnitTest :app:assembleRelease
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk specialist-${{ github.run_number }}.apk
@@ -68,9 +68,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
           name: Специалист, сборка ${{ github.run_number }}
           files: specialist-${{ github.run_number }}.apk
-          make_latest: true
+          prerelease: ${{ github.ref != 'refs/heads/main' }}
+          make_latest: ${{ github.ref == 'refs/heads/main' }}
           body: |
             Установка: скачайте specialist-${{ github.run_number }}.apk ниже на телефон и откройте файл.
             Обновление ставится поверх старой версии, настройки и программы сохраняются.
