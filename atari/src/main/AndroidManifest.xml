@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:label="Atari 65XE" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false">
-        <activity android:name=".AtariActivity" android:exported="true">
+    <application android:label="Atari 65XE" android:icon="@drawable/atari_icon" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false">
+        <activity android:name=".InspectorActivity" android:exported="false" />
+        <activity android:name=".AtariActivity" android:configChanges="orientation|screenSize|keyboardHidden" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>

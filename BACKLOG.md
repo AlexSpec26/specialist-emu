@@ -269,3 +269,16 @@
   На телефоне не проверялось. Игры ещё не запускаются: нет видеочипов, POKEY и форматов.
 - Next: ANTIC/GTIA/POKEY, затем XEX/ATR/CAR и управление — согласно atari/README.
 - Last updated: 2026-10-26, ChatGPT-Codex
+
+### ATARI-002 — Игровой APK с видео, звуком и управлением
+- Status: In progress
+- Priority: P1 (user-confirmed)
+- Origin: 2026-10-26, user: «продолжай до получения полноценного apk».
+- Desired outcome: отдельное Android-приложение запускает Atari BASIC и программы/игры,
+  показывает видео, воспроизводит POKEY, принимает экранный джойстик/клавиатуру и игровые файлы.
+- Implementation: Atari800/libretro GPL-2.0-or-later, pinned upstream 4e7fbc73765c1a9670c7506616046ad1d4ccda51,
+  vendored source and notices in atari/. Java CPU/inspector остаётся учебным отдельным режимом.
+- Acceptance criteria: реальные native headless тесты boot/video/audio/input/XEX/ATR/CAR/save-state;
+  сборка Android и подписанный APK с corresponding source в Releases; на устройстве — проверка владельцем.
+- Constraints: не менять app/zx/shell/minimon, без merge; оригинальные Atari ROM и чужие игры не распространять.
+- Validation: pending.

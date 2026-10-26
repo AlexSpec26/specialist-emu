@@ -3,9 +3,9 @@ name: Atari 65XE checks and APK
 on:
   push:
     branches: [ main, feature/atari-65xe ]
-    paths: [ 'atari/**', '!atari/**/*.md', 'tools/AtariCoreTest.java', '.github/workflows/atari.yml' ]
+    paths: [ 'atari/**', '!atari/**/*.md', 'tools/AtariCoreTest.java', 'tools/AtariNativeTest.c', 'tools/AtariJniTest.java', '.github/workflows/atari.yml' ]
   pull_request:
-    paths: [ 'atari/**', '!atari/**/*.md', 'tools/AtariCoreTest.java', '.github/workflows/atari.yml' ]
+    paths: [ 'atari/**', '!atari/**/*.md', 'tools/AtariCoreTest.java', 'tools/AtariNativeTest.c', 'tools/AtariJniTest.java', '.github/workflows/atari.yml' ]
   workflow_dispatch:
 
 permissions:
@@ -32,6 +32,14 @@ jobs:
           git clone https://github.com/Klaus2m5/6502_65C02_functional_tests /tmp/klaus
           git -C /tmp/klaus checkout 7954e2dbb49c469ea286070bf46cdd71aeb29e4b
           java -cp /tmp/atari-core AtariCoreTest /tmp/klaus/bin_files/6502_functional_test.bin
+      - name: Native boot, video, input, sound, game formats and save-state tests
+        run: |
+          python3 atari/tools/make_demo.py
+          python3 atari/tools/make_notices.py
+          git diff --exit-code -- atari/src/main/assets/demos/catch-the-star.xex atari/src/main/assets/licenses.txt
+          ASAN_OPTIONS=detect_leaks=0 make -s -f atari/src/main/jni/Makefile.host test EXTRA_CFLAGS="-O0 -fsanitize=address -g -fno-omit-frame-pointer" DEMO="$PWD/atari/src/main/assets/demos/catch-the-star.xex"
+      - name: JNI bridge integration test
+        run: make -s -f atari/src/main/jni/Makefile.host jni-test DEMO="$PWD/atari/src/main/assets/demos/catch-the-star.xex"
       - name: Compile development APK
         run: gradle --no-daemon :atari:assembleDebug
       - name: Signing key from secrets
@@ -60,23 +68,30 @@ jobs:
         run: |
           gradle --no-daemon :atari:assembleRelease
           cp atari/build/outputs/apk/release/atari-release.apk atari-65xe-${{ github.run_number }}.apk
+          python3 atari/tools/package_source.py atari-source-${{ github.run_number }}.tar.gz
       - uses: actions/upload-artifact@v4
         if: github.event_name != 'pull_request'
         with:
           name: atari-65xe-apk-${{ github.run_number }}
-          path: atari-65xe-${{ github.run_number }}.apk
+          path: |
+            atari-65xe-${{ github.run_number }}.apk
+            atari-source-${{ github.run_number }}.tar.gz
       - name: Publish Atari development release
         if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: atari-build-${{ github.run_number }}
           target_commitish: ${{ github.sha }}
-          name: Atari 65XE — CPU inspector, build ${{ github.run_number }}
-          files: atari-65xe-${{ github.run_number }}.apk
+          name: Atari 65XE — игровой эмулятор, build ${{ github.run_number }}
+          files: |
+            atari-65xe-${{ github.run_number }}.apk
+            atari-source-${{ github.run_number }}.tar.gz
           prerelease: true
           make_latest: false
           body: |
-            Разработка Atari 65XE: документированные инструкции 6502, загрузка OS/BASIC ROM,
-            регистры и пошаговый просмотр памяти. ANTIC/GTIA/POKEY пока не реализованы:
-            игры и видео Atari ещё не работают. ROM в комплект не входят.
+            Atari800: ANTIC/GTIA, POKEY, XEX/ATR/CAR/CAS, экранные джойстик и клавиатура,
+            сохранения и библиотека. Свободные замены Altirra OS/BASIC и оригинальная игра
+            «Поймай звезду» включены. Можно также загрузить свои программы и OS/BASIC ROM.
+            Игровой модуль GPL-2.0-or-later; соответствующие исходники приложены к релизу.
+            Проверено native-тестами и сборкой; на физическом телефоне проверяет владелец.
             Установите atari-65xe-${{ github.run_number }}.apk; это отдельное приложение.

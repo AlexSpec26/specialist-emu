@@ -1,57 +1,84 @@
-# Atari 65XE Android emulator — development
+# Atari 65XE — Android
 
-Separate application ID: `com.alexspec.atari`. Branch: `feature/atari-65xe`, PR #3.
+Отдельное приложение `com.alexspec.atari`. Ветка `feature/atari-65xe`, PR #3.
 
-## Current milestone (ATARI-001)
-- All 151 documented NMOS 6502 opcodes, binary/decimal arithmetic, IRQ/NMI/BRK,
-  stack, page-cross/branch timing and the NMOS indirect-JMP wrap behaviour.
-- CPU connected to the 64 KiB bus; corrected OS ROM polarity, BASIC and self-test
-  overlays, mirrored PIA PORTB control/data-direction registers, ROM write protection.
-- Load your own 16 KiB OS and optional 8 KiB BASIC ROM through Android's file picker.
-  Images are copied to private app storage and restored on the next launch.
-- CPU registers, code bytes and memory pages; reset, +1 instruction, +100 instructions,
-  page navigation and jump to PC. Work runs outside the UI thread.
-- No ROM images or games are bundled.
+## Что работает
+- Игровой движок Atari800 7.0.0 через libretro: 6502/SALLY, ANTIC, GTIA, POKEY,
+  DMA, PAL, XL/XE 64 КБ. Видео 336×240 с отображением 4:3, звук stereo 44.1 kHz.
+- Свободные замены Altirra OS/BASIC встроены — собственные ROM не обязательны.
+  При желании можно импортировать свои OS (16 КБ) и BASIC (8 КБ).
+- XEX, ATR, CAR; также пути загрузки CAS, XFD, ATX, DCM из движка.
+- Мультитач-джойстик и FIRE, START/SELECT/OPTION, экранная клавиатура с SHIFT/CTRL.
+  Физические клавиатура и геймпад: стрелки/аналоговый стик, A/B — FIRE,
+  F1/F2/F3 — START/SELECT/OPTION.
+- Пауза, сброс, звук, библиотека импортированных программ, быстрые сохранения,
+  автосохранения при сворачивании/смене программы. Снимки отдельные для каждого
+  файла/ПЗУ/режима BASIC, с проверкой хеша и атомарной записью.
+- Просмотр памяти настоящей игровой машины. Отдельный учебный Java-инспектор
+  с ранее проверенным M6502 сохранён в меню; он не является игровым движком.
 
-**Not yet capable of running Atari games or displaying the Atari video output.**
-ANTIC, GTIA, POKEY, DMA/RDY, keyboard/joystick, disk/cassette/cartridge formats,
-continuous real-time execution and save states remain to be implemented.
-Hardware register arrays outside the PIA banking subset are placeholders.
-CPU execution is instruction based; DMA and exact interrupt-edge bus timing are
-not yet modelled. Undocumented opcodes stop explicitly at their address.
-Reset currently resets CPU/PIA preserving RAM, not full Atari RESET-key behaviour.
+## Первый запуск
+1. Откроется Altirra BASIC. Кнопка ⌨ включает клавиатуру; введите `PRINT 123`
+   и нажмите RETURN. Кнопка ❚❚ — пауза.
+2. Меню ☰ → **Поймай звезду** запускает включённую оригинальную игру. Передвигайте
+   букву A джойстиком к звёздам; FIRE выдаёт звук POKEY. Внешние файлы не нужны.
+3. Своя игра: **Открыть программу / диск / картридж**. Файл копируется в библиотеку
+   приложения, исходный документ не меняется. Обычно после загрузки нужен START.
+4. BASIC при загрузке игр по умолчанию отключён; для требующих его программ
+   включите соответствующий пункт меню. OPTION можно держать при сбросе.
+5. Состояние сохраняется через меню; автосостояние восстанавливается при запуске
+   приложения и выборе программы в библиотеке. Для запуска заново — «Сброс Atari».
 
-## Verification
+Файлы библиотеки и снимки находятся в приватной папке приложения. Игры могут
+писать в импортированную копию ATR; быстрый снимок не откатывает содержимое диска.
+Состояния привязаны к текущей версии ядра и файлам этой установки.
+
+## Проверка
 
 ```sh
-javac -d /tmp/atari-core atari/src/main/java/com/alexspec/atari/core/*.java tools/AtariCoreTest.java
-java -cp /tmp/atari-core AtariCoreTest
-# Optional external Klaus test binary (not distributed here):
-java -cp /tmp/atari-core AtariCoreTest /path/to/6502_functional_test.bin
+javac -d /tmp/atari-java atari/src/main/java/com/alexspec/atari/core/*.java tools/AtariCoreTest.java
+java -cp /tmp/atari-java AtariCoreTest /path/to/6502_functional_test.bin
+python3 atari/tools/make_demo.py
+make -s -f atari/src/main/jni/Makefile.host test DEMO="$PWD/atari/src/main/assets/demos/catch-the-star.xex"
+JAVA_HOME=/path/to/jdk17 make -s -f atari/src/main/jni/Makefile.host jni-test DEMO="$PWD/atari/src/main/assets/demos/catch-the-star.xex"
 gradle :atari:assembleDebug
 ```
 
-Local/CI tests: 262144 binary ADC/SBC cases, 40000 valid BCD cases, NMOS decimal
-flags, branch/page/stack/interrupt/banking cases. Klaus functional test passes at
-$3469 after 30646177 instructions (96241367 clocks). External test suite:
-https://github.com/Klaus2m5/6502_65C02_functional_tests (GPL-3.0, fetched by CI at
-7954e2dbb49c469ea286070bf46cdd71aeb29e4b; binaries not bundled in the app).
+Требуются GCC, make, zlib headers, JDK 17, Gradle 8.11.1, SDK 35,
+NDK 27.2.12479018 (Gradle устанавливает NDK через SDK Manager).
+APK содержит arm64-v8a и x86_64; 32-битные телефоны не поддерживаются этой сборкой.
 
-## APK
+Native-тесты запускают настоящий движок с Altirra OS/BASIC:
+- загрузка BASIC до Ready и ввод `PRINT 123` с проверкой результата;
+- запуск XEX-игры, движение джойстиком, реальный сигнал POKEY, изображение ANTIC/GTIA;
+- сохранение/восстановление с повторным исполнением и сравнением RAM;
+- загрузочный ATR/SIO, INIT/RUN картриджа CAR, повторные загрузки и ошибочный файл;
+- тот же JNI-мост на host JVM. Native C tests также запускаются с AddressSanitizer.
 
-[Signed development APK, build 1](https://github.com/AlexSpec26/specialist-emu/releases/download/atari-build-1/atari-65xe-1.apk).
-This is a CPU/memory inspector for development, not a playable emulator yet.
+Учебное Java-ядро: Klaus functional test ($3469, 30646177 инструкций),
+262144 binary ADC/SBC + 40000 BCD cases, stack/IRQ/NMI/BRK/timing/banking.
+Внешний Klaus test не входит в APK или исходный архив; CI скачивает публичный
+GPL-3.0 набор по зафиксированному revision 7954e2dbb49c469ea286070bf46cdd71aeb29e4b.
 
-`.github/workflows/atari.yml` checks only Atari paths/tests. Trusted pushes to
-`feature/atari-65xe` or `main`, and manual runs, publish a signed prerelease
-`atari-build-N` using existing signing secrets. PR runs only test/build without
-signing or release. Other products and their release workflows are untouched.
+## Лицензии и сборки
 
-## Next milestones
-1. Implement ANTIC display lists/DMA and GTIA output, test OS boot with Atari video.
-2. Add POKEY sound, timers/IRQ, keyboard and console/joystick input.
-3. Implement XEX, then ATR/CAR loading; measure game compatibility.
-4. Add speed controls, memory/register visualization and history.
-5. Bundle games only with verified redistribution rights and license notices.
+Игровой Atari-модуль: GPL-2.0-or-later. Полный pinned source Atari800/libretro
+включён в `src/main/jni/vendor/atari800`. `COPYING` и `THIRD_PARTY.md` содержат
+лицензии/происхождение/изменения; уведомления также доступны из меню приложения.
+Altirra replacements разрешены к распространению с сохранением уведомлений.
+Оригинальные Atari ROM и чужие коммерческие игры не входят в APK.
+«Поймай звезду» и её генератор — оригинальная работа, CC0-1.0.
 
-On a physical Android device: not tested.
+Workflow atari.yml проверяет только Atari, создаёт signed prerelease atari-build-N
+и архив соответствующих исходников atari-source-N.tar.gz. Ключи только в CI.
+Архив автономный: settings.gradle включает только :atari, остальные исходники
+идентичны commit сборки. Релизы других продуктов не затрагиваются.
+
+## Практические ограничения
+
+На физическом Android-устройстве эту версию ещё проверяет владелец. Совместимость
+со всеми играми не заявляется: без оригинального OS часть программ несовместима
+с Altirra, а некоторые требуют других объёмов RAM/NTSC/нестандартных устройств.
+Защищённые ATX и реальные CAS пока не проверены отдельными играми; файловые пути
+поддерживаются ядром. Не реализованы rewind/history, редактирование программы
+и назначение экранных кнопок для каждого файла. Следующие улучшения — по отзывам.
