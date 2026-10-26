@@ -6,7 +6,7 @@ Small two-pass Intel 8080 assembler for the Specialist shell ROM.
 
 Syntax: Intel mnemonics (MOV, MVI, LXI, ...). Labels end with ':'; labels starting with '.'
 are local to the last global label. Directives: ORG, EQU (or =), DB, DW, DS, TEXT, INCLUDE,
-ALIGN, ASSERT, INCBIN. Expressions: + - * / % & | ^ << >> ~, ( ), $, 'c', 0x1F, 1Fh, 0b101, %101,
+ALIGN, ASSERT, INCBIN. Expressions: + - * / % & | ^ << >> ~, ( ), $, 'c', 0x1F, 1Fh, 0b101, %101, 101b,
 LOW(x), HIGH(x).
 TEXT "string" encodes the shell character set (Russian, lowercase, box drawing) and adds no
 terminator; DB "string" accepts only plain ASCII.
@@ -85,7 +85,7 @@ class Assembler:
         e = expr.strip()
         if not e:
             raise AsmError("empty expression")
-        toks = re.findall(r"'(?:[^'\\]|\\.)'|0x[0-9A-Fa-f]+|0b[01]+|%[01]+|[0-9][0-9A-Fa-f]*[Hh]\b|\d+|"
+        toks = re.findall(r"'(?:[^'\\]|\\.)'|0x[0-9A-Fa-f]+|0b[01]+|%[01]+|[01]+[Bb]\b|[0-9][0-9A-Fa-f]*[Hh]\b|\d+|"
                           r"[A-Za-z_.@?][\w.@?]*|<<|>>|==|!=|<=|>=|[<>]|[-+*/%&|^~()$]", e)
         joined = ''.join(toks)
         if joined.replace(' ', '') != e.replace(' ', ''):
@@ -103,6 +103,8 @@ class Assembler:
                 py.append(str(int(t[2:], 2)))
             elif re.fullmatch(r'%[01]+', t):
                 py.append(str(int(t[1:], 2)))
+            elif re.fullmatch(r'[01]+[Bb]', t):
+                py.append(str(int(t[:-1], 2)))
             elif re.fullmatch(r'[0-9][0-9A-Fa-f]*[Hh]', t):
                 py.append(str(int(t[:-1], 16)))
             elif re.fullmatch(r'\d+', t):
