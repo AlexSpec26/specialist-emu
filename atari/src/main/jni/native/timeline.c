@@ -380,6 +380,13 @@ void engine_trace_clear(void)
 	for (int i = 0; i < 65536; i++) ALEX_last_read[i] = ALEX_last_write[i] = ALEX_last_exec[i] = NEVER;
 }
 
+void engine_trace_arrays(const long long **reads, const long long **writes, const long long **execs)
+{
+	*reads = ALEX_last_read;
+	*writes = ALEX_last_write;
+	*execs = ALEX_last_exec;
+}
+
 void engine_trace_copy(long long *reads, long long *writes, long long *execs)
 {
 	if (reads) memcpy(reads, ALEX_last_read, sizeof(ALEX_last_read));

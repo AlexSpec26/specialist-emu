@@ -73,6 +73,7 @@ void engine_picture(uint32_t *argb);
 void engine_trace(int on);
 void engine_trace_clear(void);
 void engine_trace_copy(long long *reads, long long *writes, long long *execs);
+void engine_trace_arrays(const long long **reads, const long long **writes, const long long **execs);
 
 /* The core's 64 KB memory array (RAM plus mapped ROM), or NULL. */
 uint8_t *engine_memory(void);
