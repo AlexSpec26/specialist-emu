@@ -76,3 +76,15 @@ tools/      настольные тесты (Java): CpuTest, MachineTest, ShellC
   (такты по подпрограммам, PNG экранов).
 - SPEC/ZX ядро: `javac` ядра + нужный тест из `tools/` (см. заголовки файлов).
 - Android: `gradle :app:assembleRelease`, `gradle :zx:assembleRelease` (в CI, Gradle 8.11.1, JDK 17).
+
+## Atari 65XE (ATARI-001)
+- `atari/` — отдельное приложение, подключено исходным каркасом в settings.gradle.
+- `core/M6502` и `CpuBus` — чистая Java: документированный NMOS 6502 с instruction timing.
+  `Atari65XE` — RAM, 16K OS, 8K BASIC, self-test overlay, PIA DDR/control/PORTB.
+  ANTIC/GTIA/POKEY ещё не реализованы; массив I/O — placeholder вне PIA banking.
+- `AtariActivity` — SAF loading собственных ROM, регистры, память, шаги; один worker поток,
+  неизменяемый текст состояния передаётся в UI. ROM хранятся в приватной папке приложения.
+- `tools/AtariCoreTest.java` — локальные и внешние Klaus conformance tests.
+- `.github/workflows/atari.yml` — только Atari + его тесты; signed prerelease atari-build-N,
+  ключ в стандартных SIGNING_* secrets. PR не подписывает и не выпускает APK.
+- Timing пока на границах инструкций; DMA/RDY и недокументированные opcodes — следующие этапы.

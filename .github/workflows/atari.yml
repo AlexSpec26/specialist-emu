@@ -3,9 +3,9 @@ name: Atari 65XE checks and APK
 on:
   push:
     branches: [ main, feature/atari-65xe ]
-    paths: [ 'atari/**', 'tools/AtariCoreTest.java', '.github/workflows/atari.yml' ]
+    paths: [ 'atari/**', '!atari/**/*.md', 'tools/AtariCoreTest.java', '.github/workflows/atari.yml' ]
   pull_request:
-    paths: [ 'atari/**', 'tools/AtariCoreTest.java', '.github/workflows/atari.yml' ]
+    paths: [ 'atari/**', '!atari/**/*.md', 'tools/AtariCoreTest.java', '.github/workflows/atari.yml' ]
   workflow_dispatch:
 
 permissions:

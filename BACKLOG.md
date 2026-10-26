@@ -252,7 +252,7 @@
 ## ATARI — отдельный эмулятор Atari 65XE (`atari/`)
 
 ### ATARI-001 — Процессор 6502, загрузка ПЗУ и пошаговый инспектор
-- Status: In progress
+- Status: Review
 - Priority: P1 (proposed)
 - Origin: user, 2026-10-26: «посмотри в репозитории, можешь продолжить работу в ветке про атари?»
 - Why / user problem: продолжить каркас из PR #3; без CPU машина не исполняет код.
@@ -262,6 +262,10 @@
   Android APK с загрузкой ПЗУ и шагами; отдельные сборки Atari. Игры пока не заявляются.
 - Constraints: не менять app/, zx/, shell/, minimon/; без merge в main; ROM не распространяются.
 - Implementation: продолжение feature/atari-65xe от 88e6750, PR #3.
-- Validation: not yet tested.
+- Validation: Klaus — success $3469 (30646177 instructions); 262144 двоичных и 40000 BCD
+  случаев, стек/IRQ/NMI/BRK/тайминги/память — passed. Локальная Android debug-сборка passed.
+  GitHub CI 40290700296 и подписанная сборка 40290695602 — success.
+  APK: https://github.com/AlexSpec26/specialist-emu/releases/download/atari-build-1/atari-65xe-1.apk
+  На телефоне не проверялось. Игры ещё не запускаются: нет видеочипов, POKEY и форматов.
 - Next: ANTIC/GTIA/POKEY, затем XEX/ATR/CAR и управление — согласно atari/README.
 - Last updated: 2026-10-26, ChatGPT-Codex

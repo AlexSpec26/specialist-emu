@@ -163,3 +163,14 @@
   каждая прошивка заполняет своим. CI выпускает обе в одном релизе rom-build-N.
 - Ассемблер — перебор 256 кодов через тот же разбор, что у дизассемблера: принимает ровно то,
   что дизассемблер печатает; без меток и директив (обсуждено с владельцем).
+
+### ADR-020-ATARI — CPU-first продолжение каркаса Atari (2026-10-26)
+- Status: Accepted (реализация первого этапа roadmap atari/README, review PR #3)
+- Context: владелец попросил продолжить ветку Atari, содержащую лишь инспектор памяти.
+- Decision: сначала тестируемое чистое Java ядро документированного NMOS 6502, PIA banking
+  и загрузка своих ROM; следующими идут ANTIC/GTIA/POKEY и игровые форматы.
+- Why: Klaus conformance test даёт независимое доказательство работы CPU до видеочипов.
+- Consequences: instruction timing без DMA/RDY; undocumented opcodes явно останавливают
+  исполнение; ни игры, ни полный Atari boot пока не заявляются. ROM не распространяются.
+- Build: отдельный workflow и atari-build-N prerelease; общий ключ только в GitHub Actions.
+- Related backlog IDs: ATARI-001. Суффикс ATARI исключает коллизию с ADR-020 в SPEC PR #2.
