@@ -20,14 +20,16 @@
 ## Verified results
 - AtariNativeTest (настоящее ядро: BASIC, XEX+джойстик+POKEY, снимки, ATR, CAR, ошибки) — OK,
   также под AddressSanitizer; AtariJniTest на JVM — OK; engine.c/jni.c без предупреждений -Wall -Wextra.
-- Java-часть Atari: только компиляция в CI (локально нет Android SDK) — см. статус CI PR #3.
+- CI: PR #3 зелёный (тесты + сборка APK); на main собраны atari-build-10, build-25 (SPEC),
+  zx-build-7 — SPEC и ZX с модулем :atari собираются. atari-65xe-10.apk подписан ключом
+  владельца (сертификат 63:FA:C0:1B…9C:65, ADR-014), внутри arm64-v8a и x86_64.
 - Перед уборкой проверены заявления Codex: те же тесты и Klaus 6502 — проходили.
 - ROM: оболочка собирается (12052 из 12288 байт), ShellSmoke — SHELL OK; minimon step1/2 собираются.
 - Not run: на телефоне ничего не проверялось.
 
 ## Known problems and risks
-- Слияние изменило settings.gradle (+ :atari) → на main пересоберутся SPEC и ZX (новые build-N,
-  zx-build-N без изменений в коде) — заодно проверка, что модуль :atari им не мешает.
+- build-25 и zx-build-7 — пересборки без изменений кода (их запустил settings.gradle).
+- Старые предрелизы atari-build-1…7 с ветки остались в Releases (удалять — только по слову владельца).
 - Atari: нет карты памяти/шагов/скорости/кнопок на игру (ATARI-004…006); не все игры идут
   с Altirra OS; ATR-записи не откатываются снимком.
 - ROM: ROM-Q1 (пейзаж Treasure), ROM-Q2 (заморозка портит экран); ROM-DEV на паузе.
@@ -36,7 +38,7 @@
 - ADR-022 (принят): одна машина в Atari, инспектор убран; заменяет ADR-020-ATARI.
 
 ## Exact next steps (ordered)
-1. Владелец: поставить atari-build-N с main на телефон, проверить BASIC, «Поймай звезду», свою игру.
+1. Владелец: поставить atari-build-10 с main на телефон, проверить BASIC, «Поймай звезду», свою игру.
 2. По выбору владельца: ROM-MINI шаг 3; ATARI-004…006; ревью/слияние PR #2 (SPEC-019).
 3. Перед коммитами ROM: сборка, ShellSmoke, ShellTiming, по возможности ShellCompat.
 
