@@ -1,0 +1,86 @@
+name: Build Atari 65XE APK
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'atari/**', '!atari/**/*.md', 'build.gradle', 'settings.gradle', 'gradle.properties', 'tools/AtariNativeTest.c', 'tools/AtariJniTest.java', '.github/workflows/atari.yml' ]
+  pull_request:
+    paths: [ 'atari/**', '!atari/**/*.md', 'build.gradle', 'settings.gradle', 'gradle.properties', 'tools/AtariNativeTest.c', 'tools/AtariJniTest.java', '.github/workflows/atari.yml' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Native boot, video, input, sound, game formats and save-state tests
+        run: |
+          python3 atari/tools/make_demo.py
+          python3 atari/tools/make_notices.py
+          git diff --exit-code -- atari/src/main/assets/demos/catch-the-star.xex atari/src/main/assets/licenses.txt
+          ASAN_OPTIONS=detect_leaks=0 make -s -f atari/src/main/jni/Makefile.host test EXTRA_CFLAGS="-O0 -fsanitize=address -g -fno-omit-frame-pointer" DEMO="$PWD/atari/src/main/assets/demos/catch-the-star.xex"
+      - name: JNI bridge integration test
+        run: make -s -f atari/src/main/jni/Makefile.host jni-test DEMO="$PWD/atari/src/main/assets/demos/catch-the-star.xex"
+      - name: Compile development APK
+        run: gradle --no-daemon :atari:assembleDebug
+      - name: Signing key from secrets
+        if: github.event_name != 'pull_request'
+        env:
+          KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+          STORE_PW: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          KEY_PW: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$STORE_PW" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PW" ]; then
+            echo "::error::Signing secrets SIGNING_* are missing (ADR-014)"; exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          keytool -list -keystore "$RUNNER_TEMP/release.keystore" -storepass "$STORE_PW" -alias "$KEY_ALIAS" > /dev/null \
+            || { echo "::error::Signing secrets do not open the key (check SIGNING_* values)"; exit 1; }
+          echo "SIGNING_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          echo "SIGNING_STORE_PASSWORD=$STORE_PW" >> "$GITHUB_ENV"
+          echo "SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "SIGNING_KEY_PASSWORD=$KEY_PW" >> "$GITHUB_ENV"
+          echo "::notice::Using the signing key from GitHub secrets"
+
+      - name: Signed Atari APK
+        if: github.event_name != 'pull_request'
+        run: |
+          gradle --no-daemon :atari:assembleRelease
+          cp atari/build/outputs/apk/release/atari-release.apk atari-65xe-${{ github.run_number }}.apk
+          python3 atari/tools/package_source.py atari-source-${{ github.run_number }}.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: atari-65xe-apk-${{ github.run_number }}
+          path: |
+            atari-65xe-${{ github.run_number }}.apk
+            atari-source-${{ github.run_number }}.tar.gz
+      - name: Publish release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: atari-build-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: Atari 65XE, сборка ${{ github.run_number }}
+          files: |
+            atari-65xe-${{ github.run_number }}.apk
+            atari-source-${{ github.run_number }}.tar.gz
+          make_latest: false
+          body: |
+            Эмулятор Atari 65XE / 800XL (PAL). Установка: скачайте atari-65xe-${{ github.run_number }}.apk на телефон и откройте файл.
+            Это отдельное приложение; обновление ставится поверх, программы и сохранения остаются.
+            Встроены свободные Atari OS и BASIC (Altirra) и демо-игра «Поймай звезду»; свои игры — XEX, ATR, CAR, CAS.
+            Игровое ядро Atari800 — GPL-2.0-or-later; atari-source-${{ github.run_number }}.tar.gz — исходники именно этой сборки.

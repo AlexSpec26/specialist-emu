@@ -1,0 +1,36 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.alexspec.atari'
+    compileSdk 35
+    ndkVersion "27.2.12479018"
+    externalNativeBuild { ndkBuild { path file("src/main/jni/Android.mk") } }
+    defaultConfig {
+        applicationId 'com.alexspec.atari'
+        minSdk 24
+        targetSdk 35
+        ndk { abiFilters "arm64-v8a", "x86_64" }
+        versionCode Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER") ?: "1")
+        versionName "0.3.${System.getenv("GITHUB_RUN_NUMBER") ?: "dev"}"
+    }
+    def ksPath = System.getenv("SIGNING_KEYSTORE")
+    signingConfigs {
+        if (ksPath) {
+            release {
+                storeFile file(ksPath)
+                storePassword System.getenv("SIGNING_STORE_PASSWORD")
+                keyAlias System.getenv("SIGNING_KEY_ALIAS")
+                keyPassword System.getenv("SIGNING_KEY_PASSWORD")
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (ksPath) signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+}

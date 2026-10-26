@@ -247,3 +247,70 @@
 ### OPS-003 — Сборка каждого продукта только от своих файлов, свои релизы
 - Status: Done (2026-10-25): `build.yml` (app → `build-N`), `zx.yml` (zx → `zx-build-N`),
   `rom.yml` (shell → `rom-build-N`), флиппер — только вручную. Документы не запускают сборок.
+
+---------------------------------------------------------------------------------------------
+## ATARI — отдельный эмулятор Atari 65XE (`atari/`)
+
+### ATARI-001 — Процессор 6502, загрузка ПЗУ и пошаговый инспектор
+- Status: Done, затем убран (2026-10-26, ADR-022: владелец — «Убрать»). Код — в истории git до befcff0.
+- Priority: P1 (proposed)
+- Origin: user, 2026-10-26: «посмотри в репозитории, можешь продолжить работу в ветке про атари?»
+- Why / user problem: продолжить каркас из PR #3; без CPU машина не исполняет код.
+- Desired outcome: первый этап roadmap atari/README — документированные инструкции NMOS 6502,
+  десятичная арифметика, прерывания, такты; подключение к памяти и загрузке OS/BASIC ROM.
+- Acceptance criteria: тест Klaus 6502 и локальные тесты арифметики/таймингов/прерываний/памяти;
+  Android APK с загрузкой ПЗУ и шагами; отдельные сборки Atari. Игры пока не заявляются.
+- Constraints: не менять app/, zx/, shell/, minimon/; без merge в main; ROM не распространяются.
+- Implementation: продолжение feature/atari-65xe от 88e6750, PR #3.
+- Validation: Klaus — success $3469 (30646177 instructions); 262144 двоичных и 40000 BCD
+  случаев, стек/IRQ/NMI/BRK/тайминги/память — passed. Локальная Android debug-сборка passed.
+  GitHub CI 40290700296 и подписанная сборка 40290695602 — success.
+  APK: https://github.com/AlexSpec26/specialist-emu/releases/download/atari-build-1/atari-65xe-1.apk
+  На телефоне не проверялось. Игры ещё не запускаются: нет видеочипов, POKEY и форматов.
+- Next: ANTIC/GTIA/POKEY, затем XEX/ATR/CAR и управление — согласно atari/README.
+- Last updated: 2026-10-26, ChatGPT-Codex
+
+### ATARI-002 — Игровой APK с видео, звуком и управлением
+- Status: Review — ждёт проверки владельцем на телефоне
+- Priority: P1 (user-confirmed)
+- Origin: 2026-10-26, user: «продолжай до получения полноценного apk».
+- Desired outcome: отдельное Android-приложение запускает Atari BASIC и программы/игры,
+  показывает видео, воспроизводит POKEY, принимает экранный джойстик/клавиатуру и игровые файлы.
+- Implementation: Atari800/libretro GPL-2.0-or-later, pinned upstream 4e7fbc73765c1a9670c7506616046ad1d4ccda51,
+  vendored source and notices in atari/. Java CPU/inspector остаётся учебным отдельным режимом.
+- Acceptance criteria: реальные native headless тесты boot/video/audio/input/XEX/ATR/CAR/save-state;
+  сборка Android и подписанный APK с corresponding source в Releases; на устройстве — проверка владельцем.
+- Constraints: не менять app/zx/shell/minimon, без merge; оригинальные Atari ROM и чужие игры не распространять.
+- Validation: native BASIC boot/PRINT 123, XEX + joystick + POKEY + ANTIC/GTIA,
+  save/restore/replay RAM, ATR boot/SIO, CAR INIT/RUN, reload/error tests — passed под ASAN.
+  Host JVM JNI bridge — passed. Java Klaus/binary/BCD tests — passed.
+  GitHub PR CI 40306954620 и signed build 40306947351 — success.
+- APK: https://github.com/AlexSpec26/specialist-emu/releases/download/atari-build-5/atari-65xe-5.apk
+- Corresponding source: https://github.com/AlexSpec26/specialist-emu/releases/download/atari-build-5/atari-source-5.tar.gz
+- Limitations: физический телефон ещё не проверен; не заявляется совместимость со всеми играми,
+  защищённые ATX/реальные CAS не проверены; только arm64-v8a/x86_64; нет rewind/history.
+  Дисковые записи ATR не откатываются снимком RAM. Слито в main 2026-10-26 (ATARI-003).
+
+### ATARI-003 — Навести порядок в приложении Atari и документации
+- Status: Done (2026-10-26, Claude), устройство: не проверено
+- Origin: «надо чуть навести порядок и нормально сделать и задокументировать приложение под
+  атари. что-то кодекс накрутил там...»; на вопросы: инспектор — «Убрать», слияние — «Да, сливай»
+- Done: убран Java-инспектор (ADR-022); код Java и C переписан читаемо (именованные константы
+  кодов libretro, комментарии, без однострочников) без изменения поведения; меню: 10 пунктов +
+  «Настройки» (звук, BASIC при играх, свои ПЗУ, возврат к Altirra) вместо 15 в одном списке;
+  atari/README.md на русском — установка, управление, меню, ограничения, устройство, тесты;
+  CI: релиз только с main, без теста Klaus; память проекта сведена (VISION, ARCHITECTURE,
+  DECISIONS, HANDOFF, корневой README).
+- Validation: на ПК — AtariNativeTest (в т. ч. под ASAN) и AtariJniTest прошли; Java-часть
+  проверяется только компиляцией в CI (локально нет Android SDK). На телефоне не проверялось.
+
+### ATARI-004 — Карта памяти со вспышками чтения/записи/исполнения, как в ZX
+- Status: Inbox, Priority: P2 (предложение агента; из плана каркаса 88e6750: «interactive
+  memory/register map, speed controls, stepping/history»)
+- Заметка: нужны хуки на обращения к памяти в ядре Atari800 (memory.c / cpu.c) — правка vendor.
+
+### ATARI-005 — Пауза с шагами по командам 6502, скорость ×4…1 такт/с, как в ZX
+- Status: Inbox, Priority: P2 (предложение агента; тот же план каркаса)
+
+### ATARI-006 — Назначение экранных кнопок на клавиши для каждой игры, как в SPEC/ZX
+- Status: Inbox, Priority: P2 (предложение агента; в README ATARI-002 отмечено как отсутствующее)

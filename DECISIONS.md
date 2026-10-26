@@ -163,3 +163,42 @@
   каждая прошивка заполняет своим. CI выпускает обе в одном релизе rom-build-N.
 - Ассемблер — перебор 256 кодов через тот же разбор, что у дизассемблера: принимает ровно то,
   что дизассемблер печатает; без меток и директив (обсуждено с владельцем).
+
+### ADR-020-ATARI — CPU-first продолжение каркаса Atari (2026-10-26)
+- Status: Superseded by ADR-022 (было: Accepted, реализация первого этапа roadmap atari/README)
+- Context: владелец попросил продолжить ветку Atari, содержащую лишь инспектор памяти.
+- Decision: сначала тестируемое чистое Java ядро документированного NMOS 6502, PIA banking
+  и загрузка своих ROM; следующими идут ANTIC/GTIA/POKEY и игровые форматы.
+- Why: Klaus conformance test даёт независимое доказательство работы CPU до видеочипов.
+- Consequences: instruction timing без DMA/RDY; undocumented opcodes явно останавливают
+  исполнение; ни игры, ни полный Atari boot пока не заявляются. ROM не распространяются.
+- Build: отдельный workflow и atari-build-N prerelease; общий ключ только в GitHub Actions.
+- Related backlog IDs: ATARI-001. Суффикс ATARI исключает коллизию с ADR-020 в SPEC PR #2.
+
+### ADR-021-ATARI — Игровой runtime на Atari800 (2026-10-26)
+- Status: Accepted (реализация поручения ATARI-002, review PR #3)
+- Context: владелец просит продолжать до полноценного игрового APK, не только CPU inspector.
+- Options: самостоятельно реализовать ANTIC/GTIA/POKEY/SIO; интегрировать существующее ядро.
+- Decision: Atari800 7.0.0/libretro GPL-2.0-or-later по pinned revision; исходники в Atari-модуле,
+  corresponding source прилагается к каждому APK, лицензии сохранены в источниках и приложении.
+  Java M6502 остаётся отдельным учебным инспектором, не игровым engine.
+- Why: проверенное ядро даёт настоящие видео/звук/игровые форматы; native/JNI тесты подтверждают
+  actual boot, input, sound, game media и save-state вместо заявления о готовности по сборке.
+- Consequences: NDK и 64-bit ABI, лицензия GPL только Atari-модуля; другие продукты не меняются.
+  Встроены только свободные Altirra replacements и оригинальная CC0 demo, не original Atari ROM.
+- Related: ATARI-002; дополняет ADR-020-ATARI, не отменяет проверенное Java ядро.
+
+### ADR-022 — Atari: одна машина, учебный Java-инспектор убран (2026-10-26)
+- Status: Accepted (решение владельца: «Убрать»)
+- Supersedes: ADR-020-ATARI
+- Context: после ADR-021-ATARI в APK было две несвязанные машины: игровое ядро Atari800 и
+  учебный инспектор на своём Java-6502. Инспектор не видел игровую машину, требовал свои ПЗУ
+  и не запускал игр — владелец: «что-то кодекс накрутил там».
+- Options: (а) оставить; (б) убрать, а инструменты изучения (карта памяти, шаги) делать на
+  настоящем ядре, как в ZX.
+- Decision: (б). Удалены InspectorActivity, core/M6502, Atari65XE, CpuBus, AtariCoreTest и тест
+  Klaus из CI. Код остаётся в истории git (коммит befcff0 и ранее), к нему можно вернуться.
+  ПЗУ, загруженные в инспектор (os.rom/basic.rom), один раз переносятся в игровую машину.
+- Consequences: в APK нет пошагового 6502 до задач ATARI-004/005; одно ядро, один набор тестов.
+- Revisit if: понадобится учебная модель 6502 отдельно от игр.
+- Related: ATARI-001, ATARI-003

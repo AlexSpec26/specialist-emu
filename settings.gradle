@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 rootProject.name = "SpecialistEmu"
 include ':app'
 include ':zx'
+include ':atari'
