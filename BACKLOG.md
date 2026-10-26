@@ -191,8 +191,11 @@
   время округляется до границы целой команды; снимки занимают около 30 МиБ, история в RAM.
   На HLT шаг = 4 такта ожидания. Последняя ступень скорости округлена до 1 такта/с.
 - Follow-up 2026-10-26, user: «ну и? сборки нет» — нужен доступный подписанный APK для телефона.
-  Исправляется CI setup (удалён пакет SDK tools), запускается release workflow из ветки PR
-  с предварительным релизом и тегом на фактический commit; main не объединяется.
+  CI исправлен (удалён setup с устаревшим пакетом SDK tools); Build APK #24 успешно прошёл
+  из ветки PR на commit 9e0e576. Подписанный APK: https://github.com/AlexSpec26/specialist-emu/releases/download/build-24/specialist-24.apk
+  Предварительный релиз build-24; подпись скачанного APK проверена apksigner и совпадает
+  с ADR-014. PR CI run 40247563810 — success (SPEC tests/build, ZX build, CPU diagnostics).
+  main не объединён.
 - Open questions: нет.
 - Last updated: 2026-10-26, ChatGPT-Codex
 

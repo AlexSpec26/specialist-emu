@@ -1,5 +1,5 @@
 # Current handoff
-- Updated at (UTC): 2026-10-25 23:49
+- Updated at (UTC): 2026-10-26 00:06
 - Outgoing agent: ChatGPT-Codex
 - Branch: codex/spec-019-time-controls
 - Last pushed implementation commit: 03e47a2 (после него синхронизация main и документация; `git log -1`)
@@ -23,7 +23,7 @@
   EI/HLT, секунды/границы 10 с, v1 saves, повреждённый save, внешняя лента, звук побитно.
 - Desktop CpuTest: TST8080 — CPU IS OPERATIONAL; 8080PRE — complete; CPUTEST — CPU TESTS OK.
 - `git diff origin/main -- shell zx` — пусто; исходники других эмуляторов не менялись.
-- Not run: на телефоне не проверялось; подписанный release не собирался (ключи только в CI).
+- Not run: на телефоне не проверялось; на момент первого handoff release ещё не собирался; теперь доступен build-24 (см. follow-up).
 - Initial environment failures resolved: установлен JDK/Gradle/SDK в /workspace/toolchains,
   сетевые зависимости через proxy; ANDROID_USER_HOME задан в writable /workspace.
 
@@ -47,3 +47,18 @@
 ## Questions requiring the user's approval
 - Для завершённой реализации SPEC-019 нет; review/merge выполняет владелец.
 - Не снятые вопросы ROM: ROM-Q1, ROM-Q2 (не относятся к этой работе).
+
+## Follow-up 2026-10-26 — installable APK delivered
+- User: «ну и? сборки нет». Предыдущая локальная debug-сборка не давала владельцу APK в Releases.
+- PR CI падал на setup-android с удалённым SDK-пакетом tools. Убрана лишняя установка:
+  ubuntu-latest уже содержит SDK. CI run 40247563810 завершился success.
+- Запущен штатный Build APK через workflow_dispatch на codex/spec-019-time-controls:
+  https://github.com/AlexSpec26/specialist-emu/actions/runs/40247560442 — success.
+- Release workflow теперь проверяет release unit tests, ставит тег на github.sha и помечает
+  сборку ветки как prerelease (без замены latest). Main не объединялся.
+- Release build-24 на commit 9e0e576c339be4f88443776cbd4463861bd67f14:
+  https://github.com/AlexSpec26/specialist-emu/releases/tag/build-24
+- APK: https://github.com/AlexSpec26/specialist-emu/releases/download/build-24/specialist-24.apk
+- Скачан опубликованный APK (107388 bytes), apksigner verify успешен; SHA-256 сертификата
+  63fac01bd55da92d71b96dca374b44dcd4187ba65bd268b572bdb4b7b1d79c65 — подпись ADR-014.
+- Подписывал только GitHub Actions; ключи агент не читал. На телефоне не проверено.
