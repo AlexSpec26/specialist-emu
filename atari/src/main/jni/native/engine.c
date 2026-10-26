@@ -2,16 +2,22 @@
  * Android/desktop frontend for the Atari800 libretro core (vendor/atari800).
  *
  * The core expects a libretro frontend: it asks for options and directories through
- * environment(), delivers pictures through video(), sound through audio_batch() and reads
- * the controls through input(). This file is that frontend, reduced to what the app needs:
- * PAL 800XL/65XE with 64 KB, 336x240 picture, joystick on port 1 and the keyboard.
+ * environment() and delivers sound through audio_batch(). This file is that frontend,
+ * reduced to what the app needs: PAL 800XL/65XE with 64 KB and joystick 1. Frames are run
+ * by timeline.c through engine_frame_body(); keys are given to the machine directly as
+ * Atari key codes, not through the core's PC-keyboard mapping. The picture is converted
+ * from Screen_atari on request.
  *
  * GPL-2.0-or-later, see atari/COPYING.
  */
 #include "engine.h"
+#include "engine_internal.h"
 #include "libretro.h"
 #include "atari.h"
 #include "afile.h"
+#include "colours.h"
+#include "input.h"
+#include "screen.h"
 #include "sound.h"
 #include "sio.h"
 #include "cartridge.h"
@@ -27,21 +33,23 @@
 #define AUDIO_CAPACITY 8192
 
 static char system_dir[400], game_path[500];
-static int loaded, initialized, basic_enabled, w = 336, h = 240;
+static int loaded, initialized, basic_enabled;
 static unsigned buttons;
-static uint8_t keys[ENGINE_KEYS];
-static uint32_t picture[ENGINE_MAX_PIXELS];
-static int16_t sound[AUDIO_CAPACITY];
-static int sound_count;
 static double fps = 49.8607597;
+static size_t (*audio_sink)(const int16_t *data, size_t count);
 
 /* Defaults the core declares (RETRO_ENVIRONMENT_SET_VARIABLES), used for options we don't fix. */
 static struct { char key[128], value[256]; } options[128];
 static int option_count;
 
-/* Globals of the libretro glue in vendor/atari800/libretro. */
+/* Globals and functions of the libretro glue in vendor/atari800/libretro. */
 extern char RPATH[512];
-extern int pauseg, SHOWKEY, PARAMCOUNT;
+extern int pauseg, SHOWKEY, PARAMCOUNT, retro_sound_finalized;
+int Retro_PollEvent(void);
+void retro_sound_update(void);
+/* vendor/atari800/atari800/src/input.c (specialist-emu addition) */
+void INPUT_AlexGetState(int out[8]);
+void INPUT_AlexSetState(const int in[8]);
 
 static void logger(enum retro_log_level level, const char *format, ...) {
     (void)level;
@@ -130,27 +138,17 @@ static bool environment(unsigned cmd, void *data) {
     }
 }
 
-/* RGB565 from the core → ARGB8888 for Android. */
+/* The core's own picture output is not used: engine_picture() converts Screen_atari. */
 static void video(const void *data, unsigned width, unsigned height, size_t pitch) {
-    if (!data || width * height > ENGINE_MAX_PIXELS || width > 400 || height > 300) return;
-    w = (int)width;
-    h = (int)height;
-    for (unsigned y = 0; y < height; y++) {
-        const uint16_t *row = (const uint16_t *)((const uint8_t *)data + y * pitch);
-        for (unsigned x = 0; x < width; x++) {
-            unsigned c = row[x], r = (c >> 11) & 31, g = (c >> 5) & 63, b = c & 31;
-            picture[y * width + x] = 0xff000000u | ((r * 255 / 31) << 16) | ((g * 255 / 63) << 8) | (b * 255 / 31);
-        }
-    }
+    (void)data; (void)width; (void)height; (void)pitch;
 }
 
 static size_t audio_batch(const int16_t *data, size_t frames) {
-    size_t count = frames * 2;
-    if (count > (size_t)(AUDIO_CAPACITY - sound_count)) count = AUDIO_CAPACITY - sound_count;
-    memcpy(sound + sound_count, data, count * sizeof(int16_t));
-    sound_count += (int)count;
+    if (audio_sink) audio_sink(data, frames * 2);
     return frames;
 }
+
+void engine_set_audio_sink(size_t (*sink)(const int16_t *data, size_t count)) { audio_sink = sink; }
 
 static void audio_sample(int16_t l, int16_t r) {
     int16_t a[2] = {l, r};
@@ -164,8 +162,7 @@ static int16_t input(unsigned port, unsigned device, unsigned index, unsigned id
     if (port > 0) return 0;
     device &= RETRO_DEVICE_MASK;
     if (device == RETRO_DEVICE_JOYPAD && id < 16) return (buttons >> id) & 1;
-    if (device == RETRO_DEVICE_KEYBOARD && id < ENGINE_KEYS) return keys[id];
-    return 0;
+    return 0; /* keys go to the machine directly, see engine_frame_body */
 }
 
 void engine_close(void) {
@@ -188,8 +185,8 @@ void engine_close(void) {
         retro_deinit();
         initialized = 0;
     }
-    memset(keys, 0, sizeof(keys));
     buttons = 0;
+    timeline_free();
 }
 
 int engine_open(const char *directory, const char *content, int basic) {
@@ -206,8 +203,6 @@ int engine_open(const char *directory, const char *content, int basic) {
     snprintf(system_dir, sizeof(system_dir), "%s", directory);
     snprintf(game_path, sizeof(game_path), "%s", content ? content : "");
     basic_enabled = basic;
-    memset(picture, 0, sizeof(picture));
-    sound_count = 0;
     option_count = 0;
     PARAMCOUNT = 0;
 
@@ -245,38 +240,87 @@ int engine_open(const char *directory, const char *content, int basic) {
         engine_close();
         return 0;
     }
+    if (Screen_atari) memset(Screen_atari, 0, Screen_WIDTH * Screen_HEIGHT);
+    timeline_reset();
     return 1;
 }
 
-int engine_frame(uint32_t *pixels, int capacity, int16_t *audio, int audio_capacity,
-                 unsigned mask, const uint8_t *held) {
-    if (!loaded) return -1;
-    buttons = mask;
-    if (held) memcpy(keys, held, ENGINE_KEYS);
-    else memset(keys, 0, ENGINE_KEYS);
+int engine_is_open(void) { return loaded; }
 
-    sound_count = 0;
-    retro_run();
-
-    if (pixels && capacity >= w * h) memcpy(pixels, picture, (size_t)w * h * sizeof(uint32_t));
-    int count = sound_count < audio_capacity ? sound_count : audio_capacity;
-    if (audio && count > 0) memcpy(audio, sound, count * sizeof(int16_t));
-    return count;
+void engine_frame_body(const EngineInput *in) {
+    buttons = (unsigned)in->buttons;
+    Retro_PollEvent();                   /* joystick 1 from buttons, through input() */
+    INPUT_key_code = in->akey;
+    INPUT_key_shift = in->shift;
+    INPUT_key_consol = in->consol;
+    Atari800_Frame();
+    if (retro_sound_finalized) retro_sound_update();
 }
 
-int engine_width(void) { return w; }
-int engine_height(void) { return h; }
+void engine_picture(uint32_t *argb) {
+    const UBYTE *src = (const UBYTE *)Screen_atari;
+    int x0 = (Screen_WIDTH - ENGINE_WIDTH) / 2;
+    if (!src) {
+        memset(argb, 0, ENGINE_WIDTH * ENGINE_HEIGHT * sizeof(uint32_t));
+        return;
+    }
+    for (int y = 0; y < ENGINE_HEIGHT; y++) {
+        const UBYTE *row = src + y * Screen_WIDTH + x0;
+        for (int x = 0; x < ENGINE_WIDTH; x++)
+            argb[y * ENGINE_WIDTH + x] = 0xff000000u | (uint32_t)Colours_table[row[x]];
+    }
+}
+
 double engine_fps(void) { return fps; }
 
 void engine_reset(void) {
     if (!loaded) return;
     if (*game_path) AFILE_OpenFile(game_path, 1, 1, 0);
     else Atari800_Coldstart();
-    memset(keys, 0, ENGINE_KEYS);
     buttons = 0;
+    timeline_reset();
 }
 
-size_t engine_state_size(void) { return loaded ? retro_serialize_size() : 0; }
-int engine_save(void *data, size_t size) { return loaded && retro_serialize(data, size); }
-int engine_load(const void *data, size_t size) { return loaded && retro_unserialize(data, size); }
+/* ---- machine state: the core's save state plus what it leaves out ---- */
+
+#define STATE_MAGIC 0x41545331 /* "ATS1" */
+
+size_t engine_snapshot_size(void) { return loaded ? 8 * sizeof(int) + retro_serialize_size() : 0; }
+
+int engine_snapshot_save(void *data, size_t size) {
+    if (!loaded || size < engine_snapshot_size()) return 0;
+    INPUT_AlexGetState((int *)data);
+    return retro_serialize((char *)data + 8 * sizeof(int), size - 8 * sizeof(int));
+}
+
+int engine_snapshot_load(const void *data, size_t size) {
+    if (!loaded || size < engine_snapshot_size()) return 0;
+    if (!retro_unserialize((const char *)data + 8 * sizeof(int), size - 8 * sizeof(int))) return 0;
+    INPUT_AlexSetState((const int *)data);
+    return 1;
+}
+
+size_t engine_state_size(void) { return loaded ? 4 + engine_snapshot_size() : 0; }
+
+int engine_save(void *data, size_t size) {
+    if (!loaded || size < engine_state_size()) return 0;
+    uint32_t magic = STATE_MAGIC;
+    memcpy(data, &magic, 4);
+    const void *frame_start = timeline_mid_frame_snapshot();
+    if (frame_start) {
+        memcpy((char *)data + 4, frame_start, engine_snapshot_size());
+        return 1;
+    }
+    return engine_snapshot_save((char *)data + 4, size - 4);
+}
+
+int engine_load(const void *data, size_t size) {
+    uint32_t magic;
+    if (!loaded || size != engine_state_size()) return 0;
+    memcpy(&magic, data, 4);
+    if (magic != STATE_MAGIC || !engine_snapshot_load((const char *)data + 4, size - 4)) return 0;
+    timeline_reset();
+    return 1;
+}
+
 uint8_t *engine_memory(void) { return loaded ? retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM) : NULL; }

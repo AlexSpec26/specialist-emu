@@ -12,9 +12,10 @@ zx/         ZX: Android-приложение ZX Spectrum 48K (com.alexspec.zx)
   *.java    как в app + Games (игры в комплекте), Speed, ZxKeys
   assets/   48k.rom, games/*.tap|tzx + LICENSE.txt
 atari/      ATARI: Android-приложение Atari 65XE (com.alexspec.atari), подробно — atari/README.md
-  java/     AtariActivity (меню, импорт), PlayView (экран, джойстик, клавиатура),
-            AtariRunner (поток эмуляции, звук, снимки), NativeAtari (вызовы ядра)
-  jni/      native/engine.c (libretro-фронтенд), native/jni.c (мост), vendor/atari800 (ядро)
+  java/     как в zx (EmuActivity, MainView, MapPanel, EmuThread…) + AtariKeys, Games, Tutorial;
+            core/: AtariMachine, NativeAtari, MemTrace, Dis6502
+  jni/      native/engine.c (libretro-фронтенд), timeline.c (время, шаги, карта), jni.c (мост),
+            vendor/atari800 (ядро)
 shell/      ROM: оболочка в ПЗУ «Специалиста»
   src/      main.asm (оболочка) и devel.asm (среда разработки, ADR-019) — верхние файлы;
             common.asm, compat1–4.asm (Монитор-2), kernel.asm (текст, клавиатура),
@@ -90,14 +91,18 @@ docs/       i8080-tutorial.html (DOC-001), handoffs/ (старые переда�
 
 ## Atari 65XE
 - Ядро Atari800 7.0.0 / libretro, зафиксированная версия 4e7fbc7, исходники целиком в
-  `atari/src/main/jni/vendor/atari800` (три локальные правки — `atari/THIRD_PARTY.md`).
-  NDK 27.2 собирает `libatari_engine.so` для arm64-v8a и x86_64 (страницы 16 КБ).
-- `engine.c` — libretro-фронтенд: машина зафиксирована (800XL 64 КБ, PAL, 336×240,
-  BASIC по настройке), RGB565 → ARGB, звук 44,1 кГц стерео, джойстик и клавиши кодами libretro.
-  Машина в ядре одна на процесс, поэтому все вызовы — из `AtariRunner` под монитором
-  `NativeAtari.class`; новый поток (после пересоздания экрана) забирает ядро у старого.
-- Снимки: `states/<профиль>-quick|auto.state`, профиль = SHA-256 от версии ядра, файла
-  программы, ПЗУ и настройки BASIC; запись через AtomicFile, проверка хеша при чтении.
-- Тесты на ПК: `tools/AtariNativeTest.c` (настоящее ядро; в CI под ASAN), `tools/AtariJniTest.java`.
+  `atari/src/main/jni/vendor/atari800` (правки — `atari/THIRD_PARTY.md`). NDK 27.2 собирает
+  `libatari_engine.so` для arm64-v8a и x86_64 (страницы 16 КБ), с `-DALEXSPEC_HOOKS`.
+- `engine.c` — libretro-фронтенд: машина 800XL 64 КБ PAL, BASIC по настройке; кадр =
+  `engine_frame_body` (джойстик через input-callback, клавиши — `INPUT_key_code` кодами Atari);
+  картинка 336×240 из `Screen_atari`; снимок = save state ядра + состояние ввода из input.c.
+- `timeline.c` — время (ADR-023): хук перед каждой командой считает команды и такты, отмечает
+  обращения (карта) и по запросу выходит из ядра `longjmp`; продолжение — снимок начала кадра +
+  повтор; кольцо снимков каждые 10 кадров (10 с), журнал органов управления по кадрам.
+- Java: `core/AtariMachine` (интерфейс как у `Spectrum48`), экраны — порт из `zx/`
+  (EmuActivity, MainView, MapPanel, EmuThread, ControlConfig, Speed), свои AtariKeys, Games,
+  Tutorial, `core/Dis6502`. Все вызовы ядра — из потока эмуляции.
+- Тесты на ПК: `tools/AtariNativeTest.c` (ядро и время; в CI под ASAN), `tools/AtariJniTest.java`
+  (мост и AtariMachine).
 - Лицензия модуля — GPL-2.0-or-later; в каждый релиз кладётся архив исходников
   (`atari/tools/package_source.py`), уведомления — `assets/licenses.txt` (`make_notices.py`).

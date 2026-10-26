@@ -22,8 +22,16 @@ Local modifications to vendored source:
   literal zero character and propagate emulator initialization failure.
 - `libretro/platform.c`: disable direct-mouse mode for the joystick/keyboard frontend;
   otherwise a second initialization rejects its own stale mouse setting.
+- `atari800/src/cpu.c` (only with `-DALEXSPEC_HOOKS`, set by this app's builds): an
+  instruction hook before every opcode fetch and traced memory-access macros, used for the
+  app's memory map, single steps and slow motion (see `src/main/jni/native/alexspec_hooks.h`
+  and `timeline.c`); the MONITOR_BREAK execution history reads memory without tracing.
+- `atari800/src/input.c`: the key/joystick state that `INPUT_Frame` keeps between frames is
+  moved from function-static to file-static variables with `INPUT_AlexGetState` /
+  `INPUT_AlexSetState`, so replays from snapshots are exact.
 
-The Atari frontend, native bridge and tests are original additions. The release
+The Atari frontend (engine.c, timeline.c, jni.c), the Android application and the tests are
+original additions; the Android screens are ported from this repository's ZX Spectrum app. The release
 includes a corresponding-source archive, build files, upstream source and notices.
 Build instructions are in `atari/README.md`. No binary-only core downloads are used.
 

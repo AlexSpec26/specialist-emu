@@ -1,70 +1,325 @@
-/* Tests the actual playable Atari800 frontend with its freely distributed replacement OS. */
+/*
+ * Desktop test of the Atari engine (atari/src/main/jni/native) with the real Atari800 core and
+ * its freely distributed Altirra OS/BASIC: boot, keyboard, joystick, sound, file formats, and
+ * the time control (slow motion, single steps, going back) and memory trace that the app's
+ * Specialist/ZX-style tools rely on.
+ *
+ *   make -s -f atari/src/main/jni/Makefile.host test DEMO=atari/src/main/assets/demos/catch-the-star.xex
+ *
+ * GPL-2.0-or-later, see atari/COPYING.
+ */
 #include "engine.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-static uint32_t pixels[120000];static int16_t audio[8192];static uint8_t held[512];
-static long nonzero;
-static void frames(int n,unsigned buttons) {
-    for(int i=0;i<n;i++) {
-        int count=engine_frame(pixels,120000,audio,8192,buttons,held);
-        assert(count>0 && count<=8192);
-        for(int j=0;j<count;j++)if(audio[j]>200 || audio[j]<-200)nonzero++;
+
+#define DIR "/tmp/atari-native-system"
+#define AKEY_NONE (-1)
+#define CONSOL_NONE 7
+
+static uint32_t pixels[ENGINE_WIDTH * ENGINE_HEIGHT];
+static int16_t audio[16384];
+static long loud;
+
+static void input(int akey, int buttons) {
+    EngineInput in = {akey, 0, CONSOL_NONE, buttons};
+    engine_set_input(&in);
+}
+
+/* n whole frames at normal speed with the current controls; counts loud samples */
+static void frames(int n) {
+    for (int i = 0; i < n; i++) {
+        int count = engine_run(0, 1, audio, 16384);
+        assert(count > 0 && count <= 16384);
+        for (int j = 0; j < count; j++) if (audio[j] > 200 || audio[j] < -200) loud++;
     }
 }
+
 static void screenshot(const char *path) {
-    FILE *f=fopen(path,"wb");assert(f);int w=engine_width(),h=engine_height();fprintf(f,"P6\n%d %d\n255\n",w,h);
-    for(int i=0;i<w*h;i++){unsigned char p[3]={pixels[i]>>16,pixels[i]>>8,pixels[i]};fwrite(p,1,3,f);}fclose(f);
+    engine_picture(pixels);
+    FILE *f = fopen(path, "wb");
+    assert(f);
+    fprintf(f, "P6\n%d %d\n255\n", ENGINE_WIDTH, ENGINE_HEIGHT);
+    for (int i = 0; i < ENGINE_WIDTH * ENGINE_HEIGHT; i++) {
+        unsigned char p[3] = {pixels[i] >> 16, pixels[i] >> 8, pixels[i]};
+        fwrite(p, 1, 3, f);
+    }
+    fclose(f);
 }
-int main(int argc,char **argv) {
-    assert(argc==2);mkdir("/tmp/atari-native-system",0700);
-    assert(engine_open("/tmp/atari-native-system","",1));
-    frames(220,0);
-    assert(engine_width()==336 && engine_height()==240);
-    assert(engine_fps()>49 && engine_fps()<51);
-    uint8_t *ram=engine_memory();assert(ram);
-    int screen=ram[0x58]|ram[0x59]<<8,ready=0;
-    for(int i=0;i<955;i++)if((ram[(screen+i)&65535]&63)==0x32 && (ram[(screen+i+1)&65535]&63)==0x25
-        && (ram[(screen+i+2)&65535]&63)==0x21 && (ram[(screen+i+3)&65535]&63)==0x24 && (ram[(screen+i+4)&65535]&63)==0x39)ready=1;
-    screenshot("/tmp/atari-basic.ppm");assert(ready);
-    // Enter PRINT 123 through the actual keyboard callback path.
-    const int text[]={'p','r','i','n','t',' ', '1','2','3',13};
-    for(unsigned i=0;i<sizeof(text)/sizeof(*text);i++){held[text[i]]=1;frames(4,0);held[text[i]]=0;frames(4,0);}
-    frames(20,0);screenshot("/tmp/atari-typed.ppm");
-    int printed=0;for(int i=0;i<958;i++)if((ram[(screen+i)&65535]&127)==0x11 && (ram[(screen+i+1)&65535]&127)==0x12 && (ram[(screen+i+2)&65535]&127)==0x13)printed++;
-    assert(printed>=2); // typed command and result
-    puts("NATIVE BASIC BOOT + KEYBOARD + VIDEO OK");
-    assert(engine_open("/tmp/atari-native-system",argv[1],0));
-    frames(400,0);ram=engine_memory();
-    assert(ram[0x81]==4 && ram[0x82]==4);
+
+/* screen codes, ignoring inverse video and letter case */
+static int screen_has(const unsigned char *codes, int n) {
+    uint8_t *ram = engine_memory();
+    int screen = ram[0x58] | ram[0x59] << 8;
+    for (int i = 0; i < 960; i++) {
+        int k = 0;
+        while (k < n && (ram[(screen + i + k) & 0xffff] & 0x3f) == codes[k]) k++;
+        if (k == n) return 1;
+    }
+    return 0;
+}
+
+static unsigned long hash_ram(void) {
+    uint8_t *ram = engine_memory();
+    unsigned long h = 1469598103934665603UL;
+    for (int i = 0; i < 65536; i++) h = (h ^ ram[i]) * 1099511628211UL;
+    return h;
+}
+
+/* controls of the demo for frame f: a scripted walk with fire */
+static int script(long long f) {
+    if (f % 40 < 15) return 1 << 7;          /* right */
+    if (f % 40 < 25) return 1 << 5 | 1;      /* down + fire */
+    if (f % 40 < 30) return 1 << 6;          /* left */
+    return 0;
+}
+
+/* keys for BASIC in frame f: types A, B, C, ... with pauses (keyboard interrupts) */
+static int typing(long long f) {
+    static const int letters[] = {0x3f, 0x15, 0x12, 0x3a, 0x2a, 0x38};
+    return f % 6 < 3 ? letters[(f / 6) % 6] : AKEY_NONE;
+}
+
+static void test_basic(void) {
+    assert(engine_open(DIR, "", 1));
+    input(AKEY_NONE, 0);
+    frames(220);
+    assert(engine_fps() > 49 && engine_fps() < 51);
+    assert(engine_frame_cycles() == 312 * 114);
+    const unsigned char ready[] = {0x32, 0x25, 0x21, 0x24, 0x39}; /* "Ready" */
+    screenshot("/tmp/atari-basic.ppm");
+    assert(screen_has(ready, 5));
+    /* PRINT 123 + RETURN as Atari key codes */
+    const int keys[] = {0x0a, 0x28, 0x0d, 0x23, 0x2d, 0x21, 0x1f, 0x1e, 0x1a, 0x0c};
+    for (unsigned i = 0; i < sizeof(keys) / sizeof(*keys); i++) {
+        input(keys[i], 0);
+        frames(4);
+        input(AKEY_NONE, 0);
+        frames(4);
+    }
+    frames(20);
+    screenshot("/tmp/atari-typed.ppm");
+    uint8_t *ram = engine_memory();
+    int screen = ram[0x58] | ram[0x59] << 8, printed = 0;
+    for (int i = 0; i < 958; i++)
+        if ((ram[(screen + i) & 0xffff] & 0x7f) == 0x11 && (ram[(screen + i + 1) & 0xffff] & 0x7f) == 0x12
+            && (ram[(screen + i + 2) & 0xffff] & 0x7f) == 0x13) printed++;
+    assert(printed >= 2); /* the typed command and the result */
+    puts("BASIC BOOT + KEYBOARD + PICTURE OK");
+}
+
+static void test_demo(const char *demo) {
+    assert(engine_open(DIR, demo, 0));
+    input(AKEY_NONE, 0);
+    frames(400);
+    uint8_t *ram = engine_memory();
+    assert(ram[0x81] == 4 && ram[0x82] == 4);
+    input(AKEY_NONE, 1 << 7);
+    frames(16);
+    assert(ram[0x81] > 4); /* joystick right moves the player */
+    loud = 0;
+    input(AKEY_NONE, 1);
+    frames(16);
+    assert(loud > 100); /* fire beeps through POKEY */
+    engine_picture(pixels);
+    int colours = 0;
+    uint32_t palette[32];
+    for (int i = 0; i < ENGINE_WIDTH * ENGINE_HEIGHT; i++) {
+        int j;
+        for (j = 0; j < colours; j++) if (palette[j] == pixels[i]) break;
+        if (j == colours && colours < 32) palette[colours++] = pixels[i];
+    }
+    assert(colours >= 3);
     screenshot("/tmp/atari-demo.ppm");
-    frames(16,1u<<7);assert(ram[0x81]>4); // joystick RIGHT
-    nonzero=0;frames(16,1u<<0);assert(nonzero>100); // FIRE -> POKEY audio
-    int colours=0;uint32_t palette[32];for(int i=0;i<336*240;i++){int j;for(j=0;j<colours;j++)if(palette[j]==pixels[i])break;if(j==colours && colours<32)palette[colours++]=pixels[i];}assert(colours>=3);
-    puts("NATIVE XEX + JOYSTICK + POKEY SOUND + ANTIC/GTIA VIDEO OK");
-    size_t size=engine_state_size();assert(size>10000 && size<8*1024*1024);void *state=malloc(size);assert(state && engine_save(state,size));
-    unsigned char memory[65536];frames(20,1u<<7);memcpy(memory,engine_memory(),65536);
-    assert(engine_load(state,size));frames(20,1u<<7);assert(!memcmp(memory,engine_memory(),65536));free(state);
-    puts("NATIVE SAVE/RESTORE REPLAY RAM OK");
-    for(int i=0;i<5;i++){assert(engine_open("/tmp/atari-native-system",argv[1],0));frames(400,0);}
-    // A minimal original boot disk exercises the ATR/SIO path.
-    unsigned char disk[16+720*128]={0};disk[0]=0x96;disk[1]=2;disk[2]=0x80;disk[3]=0x16;disk[4]=128;
-    unsigned char boot[]={0,1,0,7,6,7,0xa9,0x55,0x8d,0,9,0x18,0x60};memcpy(disk+16,boot,sizeof(boot));
-    FILE *f=fopen("/tmp/atari-native-system/test.atr","wb");assert(f);fwrite(disk,1,sizeof(disk),f);fclose(f);
-    assert(engine_open("/tmp/atari-native-system","/tmp/atari-native-system/test.atr",0));frames(400,0);assert(engine_memory()[0x900]==0x55);
-    puts("NATIVE ATR BOOT + SIO OK");
-    // Original standard 8K cartridge with INIT/RUN vectors, no third-party game.
-    unsigned char cart[16+8192]={0};memcpy(cart,"CART",4);cart[7]=1;
-    unsigned char init[]={0xa9,0x66,0x8d,1,9,0x60};memcpy(cart+16,init,sizeof(init));
-    unsigned char run[]={0xa9,0x67,0x8d,2,9,0x4c,0x10,0xa0};memcpy(cart+16+16,run,sizeof(run));
-    cart[16+0x1ffa]=0x10;cart[16+0x1ffb]=0xa0;cart[16+0x1ffc]=0;cart[16+0x1ffd]=4;cart[16+0x1ffe]=0;cart[16+0x1fff]=0xa0;
-    unsigned sum=0;for(int i=16;i<(int)sizeof(cart);i++)sum+=cart[i];cart[8]=sum>>24;cart[9]=sum>>16;cart[10]=sum>>8;cart[11]=sum;
-    f=fopen("/tmp/atari-native-system/test.car","wb");assert(f);fwrite(cart,1,sizeof(cart),f);fclose(f);
-    assert(engine_open("/tmp/atari-native-system","/tmp/atari-native-system/test.car",0));frames(250,0);assert(engine_memory()[0x901]==0x66 && engine_memory()[0x902]==0x67);
-    puts("NATIVE CAR INIT/RUN OK");
-    engine_close();assert(!engine_open("/tmp/atari-native-system","/no/such/file.xex",0));
-    puts("NATIVE RELOAD / BAD FILE HANDLING OK");
-    puts("ATARI PLAYABLE CORE OK");return 0;
+    puts("XEX + JOYSTICK + POKEY SOUND + PICTURE OK");
+}
+
+/* Slow motion must give exactly the same machine as running whole frames. */
+static void test_slow_motion_is_exact(const char *content, int basic, int use_keys) {
+    assert(engine_open(DIR, content, basic));
+    input(AKEY_NONE, 0);
+    frames(300);
+    size_t n = engine_state_size();
+    unsigned char *start = malloc(n);
+    assert(start && engine_save(start, n));
+    long long f0 = engine_frames();
+
+    /* reference: whole frames */
+    unsigned long ref_hash[60];
+    int ref_regs[60][6];
+    for (int k = 0; k < 60; k++) {
+        if (use_keys) input(typing(f0 + k), 0);
+        else input(AKEY_NONE, script(f0 + k));
+        frames(1);
+        ref_hash[k] = hash_ram();
+        engine_regs(ref_regs[k]);
+    }
+
+    /* the same frames in random slices, stopping between instructions all the time */
+    assert(engine_load(start, n));
+    assert(engine_frames() == 0);  /* loading starts the timeline anew */
+    srand(7);
+    long long stops = 0;
+    for (int k = 0; k < 60; k++) {
+        long long f = engine_frames();
+        if (use_keys) input(typing(f0 + k), 0);
+        else input(AKEY_NONE, script(f0 + k));
+        while (engine_frames() == f) {
+            long long left = (f + 1) * engine_frame_cycles() - engine_time();
+            long long slice = 1 + rand() % 4000;
+            if (slice >= left) engine_run(0, 1, audio, 16384);
+            else {
+                engine_run(slice, 0, audio, 16384);
+                assert(engine_mid_frame());
+                stops++;
+            }
+        }
+        assert(hash_ram() == ref_hash[k]);
+        int r[6];
+        engine_regs(r);
+        assert(memcmp(r, ref_regs[k], sizeof r) == 0);
+    }
+    assert(stops > 500);
+    free(start);
+    printf("SLOW MOTION = WHOLE FRAMES, %s (%lld stops inside frames) OK\n",
+           use_keys ? "BASIC + KEYBOARD" : "GAME + JOYSTICK", stops);
+}
+
+/* Single steps forward and back, seconds back and forward. */
+static void test_steps(const char *demo) {
+    assert(engine_open(DIR, demo, 0));
+    engine_trace(1);
+    for (int k = 0; k < 400; k++) {
+        input(AKEY_NONE, script(k));
+        frames(1);
+    }
+    engine_run(12345, 0, audio, 16384);
+    assert(engine_mid_frame());
+
+    /* one instruction forward and back */
+    int r0[6], r1[6], r2[6];
+    long long i0 = engine_instructions(), t0 = engine_time();
+    engine_regs(r0);
+    engine_step(1);
+    assert(engine_instructions() == i0 + 1 && engine_time() > t0);
+    assert(engine_last_pc() == r0[5]);                 /* executed the instruction at old PC */
+    engine_regs(r1);
+    engine_step(1);
+    assert(engine_back_instructions(1));
+    engine_regs(r2);
+    assert(engine_instructions() == i0 + 1 && memcmp(r1, r2, sizeof r1) == 0);
+    assert(engine_back_instructions(1));
+    engine_regs(r2);
+    assert(engine_instructions() == i0 && engine_time() == t0 && memcmp(r0, r2, sizeof r0) == 0);
+
+    /* the trace marks the last instruction as executed, at its start time + 1 */
+    long long x[65536];
+    engine_step(1);
+    engine_trace_copy(NULL, NULL, x);
+    assert(x[r0[5]] == engine_last_start() + 1);
+
+    /* a second back and a second forward: the same memory as before */
+    unsigned long h = hash_ram();
+    long long t = engine_time(), i = engine_instructions();
+    assert(engine_back_time(ENGINE_CPU_HZ));
+    assert(engine_time() >= t - ENGINE_CPU_HZ && engine_time() < t - ENGINE_CPU_HZ + 2 * ENGINE_LINE_CYCLES);
+    engine_forward(t - engine_time());
+    assert(engine_instructions() == i && hash_ram() == h); /* the recorded controls are replayed */
+
+    /* after forgetting the recording, live controls take over */
+    assert(engine_back_time(ENGINE_CPU_HZ / 2));
+    engine_forget_future();
+    input(AKEY_NONE, 0);
+    engine_forward(t - engine_time());
+    assert(hash_ram() != h);
+
+    /* history: about 10 s back, not more */
+    for (int k = 0; k < 700; k++) frames(1);
+    double hs = engine_history_seconds();
+    assert(hs > 9 && hs < 11.5);
+    assert(!engine_back_time(15LL * ENGINE_CPU_HZ));
+    puts("STEPS FORWARD/BACK + SECONDS BACK/FORWARD + TRACE OK");
+}
+
+static void test_save_load(const char *demo) {
+    assert(engine_open(DIR, demo, 0));
+    input(AKEY_NONE, 0);
+    frames(300);
+    unsigned long h = hash_ram();            /* at the start of a frame */
+    engine_run(5000, 0, audio, 16384);       /* a save inside a frame stores its start... */
+    long long t = engine_time();
+    size_t n = engine_state_size();
+    void *state = malloc(n);
+    assert(n > 10000 && state && engine_save(state, n));
+    assert(engine_mid_frame() && engine_time() == t); /* ...and does not move the position */
+    input(AKEY_NONE, 1 << 7);
+    frames(20);
+    assert(hash_ram() != h);
+    assert(engine_load(state, n));
+    assert(hash_ram() == h);
+    unsigned char bad[16] = {0};
+    assert(!engine_load(bad, sizeof bad));
+    free(state);
+    puts("SAVE/LOAD OK");
+}
+
+static void test_media(void) {
+    /* a minimal original boot disk exercises the ATR/SIO path */
+    static unsigned char disk[16 + 720 * 128];
+    disk[0] = 0x96; disk[1] = 2; disk[2] = 0x80; disk[3] = 0x16; disk[4] = 128;
+    unsigned char boot[] = {0, 1, 0, 7, 6, 7, 0xa9, 0x55, 0x8d, 0, 9, 0x18, 0x60};
+    memcpy(disk + 16, boot, sizeof boot);
+    FILE *f = fopen(DIR "/test.atr", "wb");
+    assert(f);
+    fwrite(disk, 1, sizeof disk, f);
+    fclose(f);
+    assert(engine_open(DIR, DIR "/test.atr", 0));
+    input(AKEY_NONE, 0);
+    frames(400);
+    assert(engine_memory()[0x900] == 0x55);
+    puts("ATR BOOT + SIO OK");
+
+    /* an original standard 8K cartridge with INIT/RUN vectors */
+    static unsigned char cart[16 + 8192];
+    memcpy(cart, "CART", 4);
+    cart[7] = 1;
+    unsigned char init[] = {0xa9, 0x66, 0x8d, 1, 9, 0x60};
+    memcpy(cart + 16, init, sizeof init);
+    unsigned char run[] = {0xa9, 0x67, 0x8d, 2, 9, 0x4c, 0x10, 0xa0};
+    memcpy(cart + 16 + 16, run, sizeof run);
+    cart[16 + 0x1ffa] = 0x10; cart[16 + 0x1ffb] = 0xa0; cart[16 + 0x1ffc] = 0;
+    cart[16 + 0x1ffd] = 4; cart[16 + 0x1ffe] = 0; cart[16 + 0x1fff] = 0xa0;
+    unsigned sum = 0;
+    for (int i = 16; i < (int)sizeof cart; i++) sum += cart[i];
+    cart[8] = sum >> 24; cart[9] = sum >> 16; cart[10] = sum >> 8; cart[11] = sum;
+    f = fopen(DIR "/test.car", "wb");
+    assert(f);
+    fwrite(cart, 1, sizeof cart, f);
+    fclose(f);
+    assert(engine_open(DIR, DIR "/test.car", 0));
+    frames(250);
+    assert(engine_memory()[0x901] == 0x66 && engine_memory()[0x902] == 0x67);
+    puts("CAR INIT/RUN OK");
+
+    engine_close();
+    assert(!engine_open(DIR, "/no/such/file.xex", 0));
+    assert(engine_run(0, 1, audio, 16384) == -1);
+    puts("BAD FILE HANDLING OK");
+}
+
+int main(int argc, char **argv) {
+    assert(argc == 2);
+    mkdir(DIR, 0700);
+    test_basic();
+    test_demo(argv[1]);
+    for (int i = 0; i < 3; i++) assert(engine_open(DIR, argv[1], 0)); /* repeated opens */
+    test_slow_motion_is_exact(argv[1], 0, 0);
+    test_slow_motion_is_exact("", 1, 1);
+    test_steps(argv[1]);
+    test_save_load(argv[1]);
+    test_media();
+    puts("ATARI ENGINE OK");
+    return 0;
 }

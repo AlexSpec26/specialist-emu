@@ -2,15 +2,15 @@ ATARI_JNI := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 CORE_DIR := $(ATARI_JNI)/vendor/atari800
 SYSTEM_ZLIB := 1
 include $(CORE_DIR)/Makefile.common
-CFLAGS += -O2 -std=gnu99 -D__LIBRETRO__ -DFRONTEND_SUPPORTS_RGB565 $(INCFLAGS) -I$(ATARI_JNI)/native $(EXTRA_CFLAGS)
+CFLAGS += -O2 -std=gnu99 -D__LIBRETRO__ -DFRONTEND_SUPPORTS_RGB565 -DALEXSPEC_HOOKS $(INCFLAGS) -I$(ATARI_JNI)/native $(EXTRA_CFLAGS)
 .PHONY: test
 OUT ?= /tmp/atari-native-test
 test:
-	$(CC) $(CFLAGS) $(SOURCES_C) $(ATARI_JNI)/native/engine.c $(ATARI_JNI)/../../../../tools/AtariNativeTest.c -lm -lz -o $(OUT)
+	$(CC) $(CFLAGS) $(SOURCES_C) $(ATARI_JNI)/native/engine.c $(ATARI_JNI)/native/timeline.c $(ATARI_JNI)/../../../../tools/AtariNativeTest.c -lm -lz -o $(OUT)
 	$(OUT) $(DEMO)
 
 .PHONY: jni-test
 jni-test:
-	$(CC) $(CFLAGS) -fPIC -shared -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux $(SOURCES_C) $(ATARI_JNI)/native/engine.c $(ATARI_JNI)/native/jni.c -lm -lz -o /tmp/libatari_engine.so
-	$(JAVA_HOME)/bin/javac -d /tmp/atari-jni $(ATARI_JNI)/../java/com/alexspec/atari/NativeAtari.java $(ATARI_JNI)/../../../../tools/AtariJniTest.java
-	$(JAVA_HOME)/bin/java -Djava.library.path=/tmp -cp /tmp/atari-jni com.alexspec.atari.AtariJniTest $(DEMO)
+	$(CC) $(CFLAGS) -fPIC -shared -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux $(SOURCES_C) $(ATARI_JNI)/native/engine.c $(ATARI_JNI)/native/timeline.c $(ATARI_JNI)/native/jni.c -lm -lz -o /tmp/libatari_engine.so
+	$(JAVA_HOME)/bin/javac -d /tmp/atari-jni $(ATARI_JNI)/../java/com/alexspec/atari/core/*.java $(ATARI_JNI)/../../../../tools/AtariJniTest.java
+	$(JAVA_HOME)/bin/java -Djava.library.path=/tmp -cp /tmp/atari-jni com.alexspec.atari.core.AtariJniTest $(DEMO)
