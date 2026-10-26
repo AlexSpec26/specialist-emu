@@ -21,6 +21,7 @@ JNIEXPORT jboolean JNICALL JNI(open)(JNIEnv *env, jclass cls, jstring dir, jstri
 }
 
 JNIEXPORT void JNICALL JNI(close)(JNIEnv *env, jclass cls) { (void)env; (void)cls; engine_close(); }
+JNIEXPORT jboolean JNICALL JNI(is5200)(JNIEnv *env, jclass cls) { (void)env; (void)cls; return engine_is_5200(); }
 JNIEXPORT void JNICALL JNI(reset)(JNIEnv *env, jclass cls) { (void)env; (void)cls; engine_reset(); }
 
 JNIEXPORT void JNICALL JNI(setInput)(JNIEnv *env, jclass cls, jint akey, jboolean shift, jint consol, jint buttons) {

@@ -15,6 +15,7 @@
 #include "libretro.h"
 #include "atari.h"
 #include "afile.h"
+#include "akey.h"
 #include "colours.h"
 #include "input.h"
 #include "screen.h"
@@ -29,11 +30,15 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <strings.h>
 
 #define AUDIO_CAPACITY 8192
 
 static char system_dir[400], game_path[500];
 static int loaded, initialized, basic_enabled;
+/* Content is a raw cartridge image (.rom .bin .a52): the core inserts it itself, with the type
+ * found from its CRC/size, so it must not be opened again (see engine_open). */
+static int raw_cart;
 static unsigned buttons;
 static double fps = 49.8607597;
 static size_t (*audio_sink)(const int16_t *data, size_t count);
@@ -189,6 +194,13 @@ void engine_close(void) {
     timeline_free();
 }
 
+/* Extensions the libretro core treats as raw cartridge images (no CART header). */
+static int is_raw_cart(const char *path) {
+    const char *dot = strrchr(path, '.');
+    if (!dot) return 0;
+    return !strcasecmp(dot, ".rom") || !strcasecmp(dot, ".bin") || !strcasecmp(dot, ".a52");
+}
+
 int engine_open(const char *directory, const char *content, int basic) {
     if (!directory || strlen(directory) >= sizeof(system_dir) - 2) return 0;
     if (content && strlen(content) >= sizeof(game_path)) return 0;
@@ -236,7 +248,16 @@ int engine_open(const char *directory, const char *content, int basic) {
         return 0;
     }
     Sound_Continue();
-    if (*game_path && AFILE_OpenFile(game_path, 1, 1, 0) == AFILE_ERROR) {
+    /* Raw cartridge images: the core already inserted them with a type from its database
+     * (libretro-core.c, update_variables); opening them again here would insert them as
+     * "unknown type" and the machine would wait for the user to pick one. Other content is
+     * opened explicitly, as the core leaves that to the frontend. */
+    raw_cart = *game_path && is_raw_cart(game_path);
+    if (raw_cart && CARTRIDGE_main.type == CARTRIDGE_NONE) {
+        engine_close();
+        return 0;
+    }
+    if (*game_path && !raw_cart && AFILE_OpenFile(game_path, 1, 1, 0) == AFILE_ERROR) {
         engine_close();
         return 0;
     }
@@ -247,12 +268,43 @@ int engine_open(const char *directory, const char *content, int basic) {
 
 int engine_is_open(void) { return loaded; }
 
+int engine_is_5200(void) { return loaded && Atari800_machine_type == Atari800_MACHINE_5200; }
+
+/*
+ * The Atari 5200 console has no keyboard and no START/SELECT/OPTION: it has a keypad with
+ * START, PAUSE, RESET, 0-9, * and #. The app's controls are mapped onto it: START, SELECT and
+ * OPTION = START, PAUSE, RESET; digit keys = keypad digits; * and = (also # with SHIFT) = * and #.
+ * The second fire button of the 5200 joystick is SHIFT (INPUT_key_shift).
+ */
+static int keypad_5200(const EngineInput *in) {
+    static const int digits[10][2] = {
+        {AKEY_0, AKEY_5200_0}, {AKEY_1, AKEY_5200_1}, {AKEY_2, AKEY_5200_2}, {AKEY_3, AKEY_5200_3},
+        {AKEY_4, AKEY_5200_4}, {AKEY_5, AKEY_5200_5}, {AKEY_6, AKEY_5200_6}, {AKEY_7, AKEY_5200_7},
+        {AKEY_8, AKEY_5200_8}, {AKEY_9, AKEY_5200_9},
+    };
+    if (!(in->consol & INPUT_CONSOL_START)) return AKEY_5200_START;
+    if (!(in->consol & INPUT_CONSOL_SELECT)) return AKEY_5200_PAUSE;
+    if (!(in->consol & INPUT_CONSOL_OPTION)) return AKEY_5200_RESET;
+    if (in->akey < 0) return AKEY_NONE;
+    int key = in->akey & 0x3f;
+    for (int i = 0; i < 10; i++) if (key == digits[i][0]) return digits[i][1];
+    if (key == AKEY_ASTERISK) return AKEY_5200_ASTERISK;
+    if (key == AKEY_EQUAL || in->akey == AKEY_HASH) return AKEY_5200_HASH;
+    return AKEY_NONE;
+}
+
 void engine_frame_body(const EngineInput *in) {
     buttons = (unsigned)in->buttons;
     Retro_PollEvent();                   /* joystick 1 from buttons, through input() */
-    INPUT_key_code = in->akey;
-    INPUT_key_shift = in->shift;
-    INPUT_key_consol = in->consol;
+    if (Atari800_machine_type == Atari800_MACHINE_5200) {
+        INPUT_key_code = keypad_5200(in);
+        INPUT_key_shift = in->shift;
+        INPUT_key_consol = INPUT_CONSOL_NONE;
+    } else {
+        INPUT_key_code = in->akey;
+        INPUT_key_shift = in->shift;
+        INPUT_key_consol = in->consol;
+    }
     Atari800_Frame();
     if (retro_sound_finalized) retro_sound_update();
 }
@@ -275,8 +327,8 @@ double engine_fps(void) { return fps; }
 
 void engine_reset(void) {
     if (!loaded) return;
-    if (*game_path) AFILE_OpenFile(game_path, 1, 1, 0);
-    else Atari800_Coldstart();
+    if (*game_path && !raw_cart) AFILE_OpenFile(game_path, 1, 1, 0);
+    else Atari800_Coldstart(); /* a cartridge stays inserted */
     buttons = 0;
     timeline_reset();
 }

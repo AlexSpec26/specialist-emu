@@ -303,10 +303,67 @@ static void test_media(void) {
     assert(engine_memory()[0x901] == 0x66 && engine_memory()[0x902] == 0x67);
     puts("CAR INIT/RUN OK");
 
+    /* the same cartridge as a raw image (.rom, no header): the type comes from the core's
+       database or the size; it must not be opened a second time as "unknown type" */
+    f = fopen(DIR "/test.rom", "wb");
+    assert(f);
+    fwrite(cart + 16, 1, 8192, f);
+    fclose(f);
+    assert(engine_open(DIR, DIR "/test.rom", 0));
+    assert(!engine_is_5200());
+    frames(250);
+    assert(engine_memory()[0x901] == 0x66 && engine_memory()[0x902] == 0x67);
+    engine_memory()[0x901] = 0;
+    engine_reset();                          /* cold start keeps the cartridge */
+    frames(250);
+    assert(engine_memory()[0x901] == 0x66);
+    puts("RAW ROM CARTRIDGE + RESET OK");
+
     engine_close();
     assert(!engine_open(DIR, "/no/such/file.xex", 0));
     assert(engine_run(0, 1, audio, 16384) == -1);
     puts("BAD FILE HANDLING OK");
+}
+
+/* An Atari 5200 cartridge (.a52): the core switches to the 5200 console; joystick and keypad. */
+static void test_5200(void) {
+    static unsigned char cart[8192];
+    unsigned char code[] = {
+        0xad, 0x10, 0xc0, 0x8d, 0x01, 0x09,   /* LDA TRIG0 ($C010) : STA $0901 */
+        0xad, 0x09, 0xe8, 0x8d, 0x02, 0x09,   /* LDA KBCODE ($E809): STA $0902 */
+        0xee, 0x03, 0x09,                     /* INC $0903 */
+        0x4c, 0x00, 0xa0};                    /* JMP $A000 */
+    memcpy(cart, code, sizeof code);
+    cart[0x1ffd] = 0xff;                      /* skip the title screen, start at once */
+    cart[0x1ffe] = 0x00; cart[0x1fff] = 0xa0;
+    FILE *f = fopen(DIR "/test.a52", "wb");
+    assert(f);
+    fwrite(cart, 1, sizeof cart, f);
+    fclose(f);
+    assert(engine_open(DIR, DIR "/test.a52", 0));
+    assert(engine_is_5200());
+    input(AKEY_NONE, 0);
+    frames(200);
+    uint8_t *ram = engine_memory();
+    assert(ram[0x903] != 0 && ram[0x901] == 1);   /* running, fire not pressed */
+    input(AKEY_NONE, 1);
+    frames(5);
+    assert(ram[0x901] == 0);                       /* fire */
+    EngineInput start = {AKEY_NONE, 0, CONSOL_NONE & ~1, 0};
+    engine_set_input(&start);
+    frames(5);
+    assert((ram[0x902] & 0x1f) == (0x39 & 0x1f));  /* START -> keypad START */
+    input(0x1e, 0);                                /* "2" -> keypad 2 */
+    frames(5);
+    assert((ram[0x902] & 0x1f) == (0x3d & 0x1f));
+    /* time control works on the 5200 too */
+    engine_run(4000, 0, audio, 16384);
+    long long t = engine_time();
+    engine_step(1);
+    assert(engine_back_instructions(1) && engine_time() == t);
+    /* and the next program is an 800XL again */
+    assert(engine_open(DIR, "", 1) && !engine_is_5200());
+    puts("ATARI 5200 CARTRIDGE + JOYSTICK + KEYPAD + STEPS OK");
 }
 
 int main(int argc, char **argv) {
@@ -320,6 +377,7 @@ int main(int argc, char **argv) {
     test_steps(argv[1]);
     test_save_load(argv[1]);
     test_media();
+    test_5200();
     puts("ATARI ENGINE OK");
     return 0;
 }

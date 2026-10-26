@@ -28,6 +28,9 @@ typedef struct {
  * content: program/disk/cartridge file, "" or NULL = BASIC; basic: built-in BASIC on. */
 int engine_open(const char *directory, const char *content, int basic);
 void engine_close(void);
+/* The content made the core start an Atari 5200 console instead of the 800XL (a 5200 cartridge,
+ * .a52 or a .bin/.rom found in the core's 5200 list). The controls are mapped onto its keypad. */
+int engine_is_5200(void);
 /* Cold start of the current program (or BASIC). */
 void engine_reset(void);
 double engine_fps(void);
