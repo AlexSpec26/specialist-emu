@@ -287,6 +287,9 @@ public final class EmuActivity extends Activity implements MainView.Host {
         view.buttonCount = prefs.getInt("buttons", 3);
         view.joy8 = prefs.getBoolean("joy8", true);
         view.vibrate = prefs.getBoolean("vibrate", true);
+        // black-and-white TV: the machine draws in greys; post() also redraws a paused picture
+        boolean mono = prefs.getBoolean("mono", false);
+        if (mono != machine.isMono()) emu.post(() -> machine.setMono(mono));
         emu.sound = prefs.getBoolean("sound", true);
         int step = Math.max(0, Math.min(Speed.STEPS - 1, prefs.getInt("speedStep", Speed.REAL)));
         // tape input must run in real time: the microphone does not slow down
@@ -819,6 +822,9 @@ public final class EmuActivity extends Activity implements MainView.Host {
                         + "скорости, но не меньше одной команды; тап по карте — что это за адрес; есть экскурсия.\n\n"
                         + "Файлы: Android/data/com.alexspec.zx/files (папки programs и states), их видно "
                         + "с компьютера по USB.\n\n"
+                        + "Телевизор: «Настройки» → «Телевизор» — цветной или чёрно-белый, как у тех, кто "
+                        + "подключал Спектрум к чёрно-белому телевизору: цвета становятся оттенками серого "
+                        + "(у Спектрума яркость растёт с номером цвета, так что все 8 цветов различимы).\n\n"
                         + "Физическая клавиатура: Shift — CAPS SHIFT, Alt/Ctrl — SYMBOL SHIFT, "
                         + "Backspace — DELETE. Геймпад: крестовина — джойстик, A/B/X/Y — кнопки 1–4.")
                 .setPositiveButton("OK", null));
@@ -849,6 +855,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
             "Джойстик: " + (view.joy8 ? "8 направлений" : "4 направления"),
             "Звук: " + (emu.sound ? "вкл" : "выкл"),
             "Вибрация: " + (view.vibrate ? "вкл" : "выкл"),
+            "Телевизор: " + (prefs.getBoolean("mono", false) ? "чёрно-белый" : "цветной"),
         };
         show(new AlertDialog.Builder(this)
                 .setTitle("Настройки")
@@ -872,8 +879,11 @@ public final class EmuActivity extends Activity implements MainView.Host {
                         case 2:
                             prefs.edit().putBoolean("sound", !emu.sound).apply();
                             break;
-                        default:
+                        case 3:
                             prefs.edit().putBoolean("vibrate", !view.vibrate).apply();
+                            break;
+                        default:
+                            prefs.edit().putBoolean("mono", !prefs.getBoolean("mono", false)).apply();
                             break;
                     }
                     applySettings();
