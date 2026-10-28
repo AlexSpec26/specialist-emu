@@ -31,6 +31,34 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         0xFF000000, 0xFF0000FF, 0xFFFF0000, 0xFFFF00FF, 0xFF00FF00, 0xFF00FFFF, 0xFFFFFF00, 0xFFFFFFFF,
     };
 
+    /**
+     * The same colours as a black-and-white TV shows them: the brightness of each colour
+     * (luma Y = 0.299 R + 0.587 G + 0.114 B). The Spectrum's colour numbers were chosen so that
+     * brightness grows with the number: black, blue, red, magenta, green, cyan, yellow, white —
+     * on a B&W set they become eight distinct greys (plus BRIGHT).
+     */
+    public static final int[] MONO = new int[16];
+
+    static {
+        for (int i = 0; i < 16; i++) {
+            int c = PALETTE[i];
+            int y = Math.round(0.299f * ((c >> 16) & 0xFF) + 0.587f * ((c >> 8) & 0xFF) + 0.114f * (c & 0xFF));
+            MONO[i] = 0xFF000000 | y << 16 | y << 8 | y;
+        }
+    }
+
+    /** colours used for drawing: {@link #PALETTE} or {@link #MONO} */
+    private volatile int[] colors = PALETTE;
+
+    /** Black-and-white TV on/off; the picture changes from the next drawn line (renderStatic redraws). */
+    public void setMono(boolean mono) {
+        colors = mono ? MONO : PALETTE;
+    }
+
+    public boolean isMono() {
+        return colors == MONO;
+    }
+
     private static final byte[] DELAY = new byte[T_FRAME + 64];
 
     static {
@@ -670,7 +698,7 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         // left border: x = -32..-1 -> t = t0 - 16 .. t0 - 1 (4 T per 8 pixels)
         for (int x = -BORDER; x < 256 + BORDER; x += 8) {
             if (screen && x >= 0 && x < 256) continue;
-            int c = PALETTE[borderAt(t0 + (x >> 1))];
+            int c = colors[borderAt(t0 + (x >> 1))];
             int q = p + x + BORDER;
             for (int k = 0; k < 8; k++) px[q + k] = c;
         }
@@ -681,11 +709,12 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
     /** draws the 256 screen pixels of line y (0..191) at px[p + BORDER ...] */
     private void drawPaper(int[] px, int p, int y) {
         boolean flash = (frameCount & 16) != 0;
+        int[] pal = colors;
         int ab = 0x5800 + (y >> 3) * 32;
         for (int col = 0; col < 32; col++) {
             int bits = mem[pixelAddr(y, col)] & 0xFF, at = mem[ab + col] & 0xFF;
             int bright = (at & 0x40) >> 3;
-            int ink = PALETTE[(at & 7) | bright], paper = PALETTE[((at >> 3) & 7) | bright];
+            int ink = pal[(at & 7) | bright], paper = pal[((at >> 3) & 7) | bright];
             if ((at & 0x80) != 0 && flash) {
                 int tmp = ink;
                 ink = paper;
@@ -698,7 +727,7 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
 
     /** Redraws the whole picture from memory (e.g. after loading a state while paused). */
     public void renderStatic() {
-        java.util.Arrays.fill(screen, PALETTE[border]);
+        java.util.Arrays.fill(screen, colors[border]);
         for (int y = 0; y < 192; y++) drawPaper(screen, (y + BORDER) * WIDTH, y);
     }
 
