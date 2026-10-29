@@ -439,19 +439,8 @@ final class MainView extends View {
         }
         screenBmp.setPixels(pixels, 0, Spectrum48.WIDTH, 0, 0, Spectrum48.WIDTH, Spectrum48.HEIGHT);
         c.drawBitmap(screenBmp, srcRect, screenRect, bmpPaint);
-        if (paused) {
-            fill.setColor(0x99000000);
-            c.drawRect(screenRect, fill);
-            text.setColor(Color.WHITE);
-            text.setTextSize(Math.min(screenRect.height() * 0.14f, 40 * dp));
-            c.drawText("❚❚  ПАУЗА", screenRect.centerX(), screenRect.centerY(), text);
-            text.setTextSize(Math.min(screenRect.height() * 0.06f, 15 * dp));
-            text.setColor(0xFFBBBBC5);
-            c.drawText("нажмите на экран, чтобы продолжить", screenRect.centerX(),
-                    screenRect.centerY() + screenRect.height() * 0.12f, text);
-        }
-        if (System.currentTimeMillis() < infoUntil) drawMachineInfo(c);
-        if (paused && pickPrompt == null) drawStepButtons(c);
+        // The picture stays clean on pause: the step buttons appear around it (toolbar / sides)
+        // instead of a dark veil, and the registers only after a step (owner's request, UX-001).
         if (tape != null) drawTapeIndicator(c);
         else drawCassette(c);
         if (speedBadge != null) {
@@ -470,7 +459,7 @@ final class MainView extends View {
         if (toolbarY >= 0) {
             fill.setColor(0xFF15151A);
             c.drawRect(0, toolbarY, getWidth(), toolbarY + toolbarH, fill);
-            if (title != null && !title.isEmpty()) {
+            if (title != null && !title.isEmpty() && !(paused && pickPrompt == null)) {
                 text.setTextSize(15 * dp);
                 text.setColor(0xFF9A9AA5);
                 String t = title;
@@ -487,8 +476,10 @@ final class MainView extends View {
             map.programTitle = title;
             map.draw(c);
         }
+        if (paused && pickPrompt == null) drawStepButtons(c);
         if (keyboardVisible) drawKeyboard(c);
         else if (!(mapVisible && map.isTutorialActive())) drawControls(c);
+        if (System.currentTimeMillis() < infoUntil) drawMachineInfo(c); // on top of everything, 4 s after a step
     }
 
     private void drawUiButton(Canvas c, RectF r, String label, boolean active) {
@@ -541,14 +532,26 @@ final class MainView extends View {
         postInvalidateDelayed(250);
     }
 
+    /**
+     * Step buttons outside the picture: portrait — in the toolbar instead of the title;
+     * landscape — two on each side of the picture, under ☰ and ⌨.
+     */
     private void layoutStepButtons() {
-        float h = Math.min(44 * dp, screenRect.height() * 0.16f);
         float gap = 6 * dp;
-        float w = (screenRect.width() - gap * 5) / 4f;
-        float y = screenRect.bottom - h - gap;
-        for (int i = 0; i < 4; i++) {
-            float x = screenRect.left + gap + i * (w + gap);
-            stepRects[i].set(x, y, x + w, y + h);
+        if (toolbarY >= 0) {
+            float left = menuRect.right + gap, right = kbdBtnRect.left - gap;
+            float w = (right - left - gap * 3) / 4f;
+            for (int i = 0; i < 4; i++) {
+                float x = left + i * (w + gap);
+                stepRects[i].set(x, menuRect.top, x + w, menuRect.bottom);
+            }
+        } else {
+            float h = 44 * dp;
+            for (int i = 0; i < 2; i++) {
+                float y = menuRect.bottom + gap + i * (h + gap);
+                stepRects[i].set(menuRect.left, y, screenRect.left - gap, y + h);
+                stepRects[i + 2].set(screenRect.right + gap, y, kbdBtnRect.right, y + h);
+            }
         }
     }
 
@@ -559,7 +562,10 @@ final class MainView extends View {
             fill.setColor(0xDD2A3A80);
             c.drawRoundRect(r, 9 * dp, 9 * dp, fill);
             text.setColor(Color.WHITE);
-            text.setTextSize(Math.min(r.height() * 0.42f, 16 * dp));
+            float ts = Math.min(r.height() * 0.42f, 16 * dp);
+            text.setTextSize(ts);
+            float tw = text.measureText(STEP_LABELS[i]);
+            if (tw > r.width() * 0.9f) text.setTextSize(ts * r.width() * 0.9f / tw);
             c.drawText(STEP_LABELS[i], r.centerX(), r.centerY() + text.getTextSize() * 0.36f, text);
         }
     }
@@ -599,7 +605,8 @@ final class MainView extends View {
         text.setTextSize(ts);
         float lh = ts * 1.25f, pad = 5 * dp, maxW = 0;
         for (String l : lines) maxW = Math.max(maxW, text.measureText(l));
-        float bx = screenRect.left + 6 * dp, by = screenRect.top + 30 * dp;
+        // portrait: under the toolbar, off the picture; landscape: no room outside, top-left corner
+        float bx = screenRect.left + 6 * dp, by = toolbarY >= 0 ? toolbarY + toolbarH + 6 * dp : screenRect.top + 6 * dp;
         fill.setColor(0xD0101018);
         c.drawRoundRect(bx, by, bx + maxW + 2 * pad, by + lh * lines.length + pad, 6 * dp, 6 * dp, fill);
         for (int i = 0; i < lines.length; i++) {
