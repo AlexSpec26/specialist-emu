@@ -441,6 +441,7 @@ final class MainView extends View {
         c.drawBitmap(screenBmp, srcRect, screenRect, bmpPaint);
         // The picture stays clean on pause: the step buttons appear around it (toolbar / sides)
         // instead of a dark veil, and the registers only after a step (owner's request, UX-001).
+        if (paused && pickPrompt == null) drawPauseSign(c);
         if (tape != null) drawTapeIndicator(c);
         else drawCassette(c);
         if (speedBadge != null) {
@@ -480,6 +481,18 @@ final class MainView extends View {
         if (keyboardVisible) drawKeyboard(c);
         else if (!(mapVisible && map.isTutorialActive())) drawControls(c);
         if (System.currentTimeMillis() < infoUntil) drawMachineInfo(c); // on top of everything, 4 s after a step
+    }
+
+    /** a small translucent pause sign in the middle of the picture */
+    private void drawPauseSign(Canvas c) {
+        float r = Math.min(26 * dp, screenRect.height() * 0.09f);
+        float cx = screenRect.centerX(), cy = screenRect.centerY();
+        fill.setColor(0x55000000);
+        c.drawCircle(cx, cy, r, fill);
+        fill.setColor(0x88FFFFFF);
+        float bw = r * 0.22f, bh = r * 0.9f, gap = r * 0.16f;
+        c.drawRect(cx - gap - bw, cy - bh / 2, cx - gap, cy + bh / 2, fill);
+        c.drawRect(cx + gap, cy - bh / 2, cx + gap + bw, cy + bh / 2, fill);
     }
 
     private void drawUiButton(Canvas c, RectF r, String label, boolean active) {

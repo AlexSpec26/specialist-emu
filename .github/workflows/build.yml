@@ -4,7 +4,10 @@ on:
   push:
     branches: [ main ]
     # SPEC only: other products have their own workflows (ADR-013)
-    paths: [ 'app/**', 'build.gradle', 'settings.gradle', 'gradle.properties', 'tools/CpuTest.java', 'tools/MachineTest.java', '.github/workflows/build.yml' ]
+    paths: [ 'app/**', 'build.gradle', 'settings.gradle', 'gradle.properties', 'tools/CpuTest.java', 'tools/MachineTest.java', 'tools/SpecTimeTest.java', '.github/workflows/build.yml' ]
+  pull_request:
+    # checks only: tests and an unsigned debug build, no release
+    paths: [ 'app/**', 'build.gradle', 'settings.gradle', 'gradle.properties', 'tools/CpuTest.java', 'tools/MachineTest.java', 'tools/SpecTimeTest.java', '.github/workflows/build.yml' ]
   workflow_dispatch:
 
 permissions:
@@ -34,7 +37,19 @@ jobs:
           grep -q "CPU IS OPERATIONAL" /tmp/cpu.log
           grep -q "CPU TESTS OK" /tmp/cpu.log
 
+      - name: Time control test (pause, steps, a minute of history)
+        run: |
+          mkdir -p /tmp/time
+          javac -d /tmp/time app/src/main/java/com/alexspec/specialist/core/*.java tools/SpecTimeTest.java
+          java -cp /tmp/time SpecTimeTest shell/base/spec_m2.rom | tee /tmp/time.log
+          grep -q "SPEC TIME CONTROL OK" /tmp/time.log
+
+      - name: Compile check (pull request)
+        if: github.event_name == 'pull_request'
+        run: gradle --no-daemon :app:assembleDebug
+
       - name: Signing key from secrets
+        if: github.event_name != 'pull_request'
         env:
           KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
           STORE_PW: ${{ secrets.SIGNING_STORE_PASSWORD }}
@@ -54,17 +69,21 @@ jobs:
           echo "::notice::Using the signing key from GitHub secrets"
 
       - name: Build APK
+        if: github.event_name != 'pull_request'
         run: gradle --no-daemon :app:assembleRelease
 
       - name: Rename APK
+        if: github.event_name != 'pull_request'
         run: cp app/build/outputs/apk/release/app-release.apk specialist-${{ github.run_number }}.apk
 
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: specialist-apk-${{ github.run_number }}
           path: specialist-${{ github.run_number }}.apk
 
       - name: Publish release
+        if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}

@@ -327,6 +327,7 @@ double engine_fps(void) { return fps; }
 
 void engine_reset(void) {
     if (!loaded) return;
+    timeline_leave_frame();
     if (*game_path && !raw_cart) AFILE_OpenFile(game_path, 1, 1, 0);
     else Atari800_Coldstart(); /* a cartridge stays inserted */
     buttons = 0;
@@ -369,6 +370,7 @@ int engine_save(void *data, size_t size) {
 int engine_load(const void *data, size_t size) {
     uint32_t magic;
     if (!loaded || size != engine_state_size()) return 0;
+    timeline_leave_frame();
     memcpy(&magic, data, 4);
     if (magic != STATE_MAGIC || !engine_snapshot_load((const char *)data + 4, size - 4)) return 0;
     timeline_reset();

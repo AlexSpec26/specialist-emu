@@ -32,6 +32,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 
 public final class EmuActivity extends Activity implements MainView.Host {
     private static final int REQ_PROGRAM = 1;
@@ -362,6 +363,9 @@ public final class EmuActivity extends Activity implements MainView.Host {
             machine.releaseAllKeys();
         }
         emu.setUserPaused(p);
+        if (!p && emu.stepping) emu.stepping = false;
+        // play goes on: from here the live keys count, not the ones recorded before going back
+        if (!p) emu.post(machine::forgetFuture);
         view.paused = tapPaused || view.isPicking();
         view.invalidate();
     }
@@ -370,6 +374,28 @@ public final class EmuActivity extends Activity implements MainView.Host {
     public void onScreenTapped() {
         tapPaused = !tapPaused;
         updatePause();
+    }
+
+    @Override
+    public void onStep(int kind) {
+        // single instruction: the map shows only that instruction; a second: the usual fading flashes
+        emu.stepping = kind == 1 || kind == 2;
+        emu.post(() -> {
+            boolean ok = true;
+            switch (kind) {
+                case 0: ok = machine.backTime(Specialist.CPU_HZ); break;
+                case 1: ok = machine.backInstructions(1); break;
+                case 2: machine.stepInstruction(); break;
+                default: machine.forward(Specialist.CPU_HZ); break;
+            }
+            if (!ok) {
+                float h = machine.historySeconds();
+                ui.post(() -> toast(String.format(Locale.US, machine.tapeInput != null
+                        ? "Назад нельзя, пока включён вход с микрофона"
+                        : "Дальше назад нельзя: история хранит %.0f с (после загрузки — с её момента)", Math.max(0, h))));
+            }
+            ui.post(view::showMachineInfo);
+        });
     }
 
     // ------------------------------------------------------------------ menu
@@ -736,7 +762,12 @@ public final class EmuActivity extends Activity implements MainView.Host {
                         + "Кнопки: меню → «Настроить кнопки». Для каждой программы раскладка запоминается отдельно.\n\n"
                         + "Клавиатура: кнопка ⌨. НР (Shift) нажимается один раз и действует на следующую клавишу. "
                         + "Р/Л переключает латиницу и кириллицу.\n\n"
-                        + "Пауза: нажмите на экран «Специалиста». Пока открыто меню, эмуляция тоже стоит.\n\n"
+                        + "Пауза: нажмите на экран «Специалиста» — посреди экрана появится маленький знак паузы, "
+                        + "а вместо названия программы (сбоку от экрана, если телефон лежит) — кнопки: на секунду и на "
+                        + "одну команду назад и вперёд. После шага 4 секунды видны последняя и следующая команды "
+                        + "процессора с регистрами. Назад можно уйти на минуту; вперёд после этого повторяется то, что "
+                        + "было (и нажатые клавиши), пока не продолжите игру. При шагах по одной команде на карте памяти "
+                        + "светится только эта команда. Пока открыто меню, эмуляция тоже стоит.\n\n"
                         + "Сохранения: у каждой программы своё. В «Моих программах» значок 💾 — "
                         + "у программы есть сохранение, при запуске можно продолжить с него.\n\n"
                         + "Замедление: меню → «Замедление», от 1 (реальная скорость) до 100.\n\n"

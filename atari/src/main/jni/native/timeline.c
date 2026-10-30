@@ -9,7 +9,8 @@
  * continued directly: the state saved at the start of that frame ("scratch") is restored and
  * the frame is run again up to the next stopping point. Emulation is deterministic, so the
  * repeated part is identical. Going back works the same way from snapshots kept every
- * SNAP_EVERY frames for the last ~10 s, with the controls of every frame logged for replay.
+ * SNAP_EVERY frames for the last ~62 s (at least a minute), with the controls of every frame
+ * logged for replay.
  *
  * Time is counted in machine cycles (1.77 MHz PAL, 114 per scan line, 312 lines per frame)
  * from the moment the program was opened. GPL-2.0-or-later, see atari/COPYING.
@@ -24,9 +25,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SNAP_EVERY 10
-#define RING 50                 /* 50 x 10 frames = 500 frames, about 10 s */
-#define LOG 1024                /* controls of the last frames, more than RING * SNAP_EVERY */
+#define SNAP_EVERY 25
+#define RING 125                /* 125 x 25 frames = 3125 frames, about 62 s (~35 MB) */
+#define LOG 4096                /* controls of the last frames, more than RING * SNAP_EVERY */
 #define SCREEN_BYTES (Screen_WIDTH * Screen_HEIGHT)
 
 /* ---- trace (used by the hooks in cpu.c) ---- */
@@ -185,6 +186,11 @@ static int frame_or_stop(const EngineInput *in)
 	if (setjmp(stop_jump)) {
 		stop_armed = 0;
 		update_hooks();
+		/* ANTIC was left in the middle of a scan line. The machine is never continued from
+		 * here (the frame is run again from its start), but code outside the frame loop -
+		 * reset, a new machine - must not see "drawing": ANTIC_PutByte would then index the
+		 * cycle maps with the stale position. ANTIC_Frame sets this again at its start. */
+		ANTIC_cur_screen_pos = ANTIC_NOT_DRAWING;
 		return 1;
 	}
 	engine_frame_body(in);
@@ -392,6 +398,16 @@ void engine_trace_copy(long long *reads, long long *writes, long long *execs)
 	if (reads) memcpy(reads, ALEX_last_read, sizeof(ALEX_last_read));
 	if (writes) memcpy(writes, ALEX_last_write, sizeof(ALEX_last_write));
 	if (execs) memcpy(execs, ALEX_last_exec, sizeof(ALEX_last_exec));
+}
+
+/* Before something acts on the machine from outside the timeline (reset, loading a state):
+   go back to the start of the frame we are stopped in, a consistent machine. */
+void timeline_leave_frame(void)
+{
+	if (!mid) return;
+	if (have_scratch) snap_restore(&scratch);
+	mid = 0;
+	pos_time = frame_base(cur_frame);
 }
 
 /* While stopped inside a frame, the machine itself is not in a savable state: a save stores the

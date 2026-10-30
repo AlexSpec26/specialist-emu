@@ -235,11 +235,13 @@ static void test_steps(const char *demo) {
     engine_forward(t - engine_time());
     assert(hash_ram() != h);
 
-    /* history: about 10 s back, not more */
-    for (int k = 0; k < 700; k++) frames(1);
+    /* history: at least a minute back, not more */
+    for (int k = 0; k < 3300; k++) frames(1);
     double hs = engine_history_seconds();
-    assert(hs > 9 && hs < 11.5);
-    assert(!engine_back_time(15LL * ENGINE_CPU_HZ));
+    assert(hs >= 60 && hs < 63.5); /* at least a minute */
+    long long before = engine_time();
+    assert(engine_back_time(55LL * ENGINE_CPU_HZ) && before - engine_time() <= 55LL * ENGINE_CPU_HZ);
+    assert(!engine_back_time(20LL * ENGINE_CPU_HZ));
     puts("STEPS FORWARD/BACK + SECONDS BACK/FORWARD + TRACE OK");
 }
 
@@ -262,7 +264,22 @@ static void test_save_load(const char *demo) {
     unsigned char bad[16] = {0};
     assert(!engine_load(bad, sizeof bad));
     free(state);
-    puts("SAVE/LOAD OK");
+    /* stopped inside a frame, then acted on from outside: load, reset, a new machine */
+    engine_run(7000, 0, audio, 16384);
+    assert(engine_mid_frame());
+    state = malloc(n);
+    assert(state && engine_save(state, n));
+    engine_run(3000, 0, audio, 16384);
+    assert(engine_load(state, n));
+    engine_run(9000, 0, audio, 16384);
+    engine_reset();
+    frames(10);
+    engine_run(5000, 0, audio, 16384);
+    assert(engine_mid_frame());
+    assert(engine_open(DIR, demo, 0));
+    frames(10);
+    free(state);
+    puts("SAVE/LOAD OK (also from inside a frame)");
 }
 
 static void test_media(void) {

@@ -46,7 +46,7 @@ int engine_run(long long cycles, int to_frame_end, int16_t *audio, int audio_cap
 /* Forward by instructions / by cycles, without sound. */
 void engine_step(long long instructions);
 void engine_forward(long long cycles);
-/* Back by instructions / cycles. Returns 0 if the history (~10 s) does not reach that far;
+/* Back by instructions / cycles. Returns 0 if the history (~62 s) does not reach that far;
  * then the oldest point kept is restored. */
 int engine_back_instructions(long long n);
 int engine_back_time(long long cycles);
