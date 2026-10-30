@@ -701,7 +701,7 @@ public final class Specialist implements Bus {
     // ------------------------------------------------------------------ save states
 
     private static final int STATE_MAGIC = 0x53504543; // "SPEC"
-    /** 1: up to build 23 and in builds 25..28; 2: build 24 and from build 29 on. Both are read. */
+    /** 1: up to build 23 and in builds 25..28; 2: build 24 and from build 30 on. Both are read. */
     private static final int STATE_VERSION = 2;
 
     public byte[] saveState() {

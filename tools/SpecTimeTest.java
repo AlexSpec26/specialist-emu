@@ -142,7 +142,7 @@ public final class SpecTimeTest {
         check(tr.trace.lastExec[pc] == tr.lastInstrStart + 1, "trace stamp of the executed instruction");
         System.out.println("TRACE OK");
 
-        // 7. saves: version 2 (build 24 and from build 29) restores exactly; version 1 (builds
+        // 7. saves: version 2 (build 24 and from build 30) restores exactly; version 1 (builds
         // 25..28: the same without the 60-byte tail) is still read
         Specialist sv = boot(rom);
         for (int f = 0; f < 40; f++) sv.runFrame(audio);
