@@ -384,19 +384,21 @@ final class MapPanel {
             out.add("ВВ55: " + regs[a & 3]);
         }
         StringBuilder acc = new StringBuilder();
-        appendAgo(acc, "чтение", trace.lastRead[a], trace.now);
-        appendAgo(acc, "запись", trace.lastWrite[a], trace.now);
-        appendAgo(acc, "исполнение", trace.lastExec[a], trace.now);
+        long tnow = machine.time();
+        appendAgo(acc, "чтение", trace.lastRead[a], tnow);
+        appendAgo(acc, "запись", trace.lastWrite[a], tnow);
+        appendAgo(acc, "исполнение", trace.lastExec[a], tnow);
         out.add(acc.length() == 0 ? "обращений не было" : acc.toString());
         return out.toArray(new String[0]);
     }
 
-    private static void appendAgo(StringBuilder sb, String what, int stamp, int now) {
-        if (stamp == 0) return;
-        float sec = (now - stamp) / 50f;
+    /** age of an access in emulated time (cycles of the 2 MHz processor) */
+    private static void appendAgo(StringBuilder sb, String what, long stamp, long now) {
+        long age = now - stamp;
+        if (age < 0 || age > 1L << 40) return;
         if (sb.length() > 0) sb.append(", ");
-        if (sec < 0.05f) sb.append(what).append(" сейчас");
-        else sb.append(what).append(String.format(java.util.Locale.US, " %.1f с назад", sec));
+        if (age < 100_000) sb.append(what).append(String.format(java.util.Locale.US, " %d т. назад", age));
+        else sb.append(what).append(String.format(java.util.Locale.US, " %.1f с назад", age / (float) Specialist.CPU_HZ));
     }
 
     // ------------------------------------------------------------------ tutorial

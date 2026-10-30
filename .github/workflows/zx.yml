@@ -3,7 +3,10 @@ name: Build ZX Spectrum APK
 on:
   push:
     branches: [ main ]
-    paths: [ 'zx/**', 'build.gradle', 'settings.gradle', 'gradle.properties', 'tools/ZexTest.java', 'tools/Z80FuseTest.java', 'tools/ZxShot.java', '.github/workflows/zx.yml' ]
+    paths: [ 'zx/**', 'build.gradle', 'settings.gradle', 'gradle.properties', 'tools/ZexTest.java', 'tools/Z80FuseTest.java', 'tools/ZxShot.java', 'tools/ZxTimeTest.java', '.github/workflows/zx.yml' ]
+  pull_request:
+    # checks only: tests and an unsigned debug build, no release
+    paths: [ 'zx/**', 'build.gradle', 'settings.gradle', 'gradle.properties', 'tools/ZexTest.java', 'tools/Z80FuseTest.java', 'tools/ZxShot.java', 'tools/ZxTimeTest.java', '.github/workflows/zx.yml' ]
   workflow_dispatch:
 
 permissions:
@@ -34,7 +37,19 @@ jobs:
           test "$(grep -c 'OK$' /tmp/zex.log)" = "67"
           ! grep -q "ERROR" /tmp/zex.log
 
+      - name: Time control test (a minute of history, key replay, steps)
+        run: |
+          mkdir -p /tmp/time
+          javac -d /tmp/time zx/src/main/java/com/alexspec/zx/core/*.java tools/ZxTimeTest.java
+          java -cp /tmp/time ZxTimeTest zx/src/main/assets/48k.rom "zx/src/main/assets/games/Sir Ababol.tzx" | tee /tmp/time.log
+          grep -q "ZX TIME CONTROL OK" /tmp/time.log
+
+      - name: Compile check (pull request)
+        if: github.event_name == 'pull_request'
+        run: gradle --no-daemon :zx:assembleDebug
+
       - name: Signing key from secrets
+        if: github.event_name != 'pull_request'
         env:
           KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
           STORE_PW: ${{ secrets.SIGNING_STORE_PASSWORD }}
@@ -54,17 +69,21 @@ jobs:
           echo "::notice::Using the signing key from GitHub secrets"
 
       - name: Build APK
+        if: github.event_name != 'pull_request'
         run: gradle --no-daemon :zx:assembleRelease
 
       - name: Rename APK
+        if: github.event_name != 'pull_request'
         run: cp zx/build/outputs/apk/release/zx-release.apk zx-spectrum-${{ github.run_number }}.apk
 
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: zx-spectrum-apk-${{ github.run_number }}
           path: zx-spectrum-${{ github.run_number }}.apk
 
       - name: Publish release
+        if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: zx-build-${{ github.run_number }}

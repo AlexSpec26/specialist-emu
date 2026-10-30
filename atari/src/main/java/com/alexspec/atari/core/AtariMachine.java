@@ -160,7 +160,7 @@ public final class AtariMachine implements MemTrace.Mem {
         refresh();
     }
 
-    /** Goes back {@code n} instructions; false if the history (~10 s) does not reach. */
+    /** Goes back {@code n} instructions; false if the history (~62 s) does not reach. */
     public boolean backInstructions(long n) {
         if (!open) return false;
         boolean ok = NativeAtari.backInstructions(n);

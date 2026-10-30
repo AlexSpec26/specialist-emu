@@ -49,15 +49,25 @@ public final class MemTrace {
 
     public static final int KIND_NONE = 0, KIND_READ = 1, KIND_WRITE = 2, KIND_RW = 3, KIND_EXEC = 4;
 
-    /** Stamps are "trace frames"; the frame counter advances once per real-time display frame. */
-    public final int[] lastRead = new int[65536];
-    public final int[] lastWrite = new int[65536];
-    public final int[] lastExec = new int[65536];
+    private static final long NEVER = Long.MIN_VALUE / 4;
+
+    /**
+     * Stamps are emulated time in CPU cycles (start of the accessing instruction + 1), so a
+     * flash follows the emulation: slowed down 100 times, it lasts 100 times fewer cycles; when
+     * stepping, only the last instruction lights up (as in the ZX app).
+     */
+    public final long[] lastRead = new long[65536];
+    public final long[] lastWrite = new long[65536];
+    public final long[] lastExec = new long[65536];
 
     public volatile boolean enabled;
-    /** current trace frame; starts high so that zero-initialised stamps count as "long ago" */
-    public int now = 1 << 20;
-    /** how many frames a flash lasts (5 frames = 0.1 s at 50 Hz) */
+    /** emulated time the picture is drawn for (set by the renderer) */
+    public volatile long now;
+    /** how long a flash lasts, in cycles of emulated time (set from the speed) */
+    public volatile long window = 200_000;
+    /** single-step mode: if >= 0, only accesses made since this moment are lit, at full brightness */
+    public volatile long stepFrom = -1;
+    /** number of fade levels; also the flash length in 1/50 s of real time */
     public int flashFrames = 5;
 
     // colours: bright = for 1 bits, dark = for 0 bits
@@ -68,6 +78,7 @@ public final class MemTrace {
     private int[][] palOn, palOff;
 
     public MemTrace() {
+        clear();
         setColors(0xFF30FF40, 0xFFFF2A9E, 0xFFFFE030, 0xFF20E8FF);
     }
 
@@ -111,36 +122,41 @@ public final class MemTrace {
         return 0xFF000000 | (r << 16) | (g << 8) | bl;
     }
 
-    /** Advance one display frame (call once per real 20 ms frame, not while paused). */
-    public void tick() {
-        now++;
+    public void clear() {
+        java.util.Arrays.fill(lastRead, NEVER);
+        java.util.Arrays.fill(lastWrite, NEVER);
+        java.util.Arrays.fill(lastExec, NEVER);
     }
 
-    public void clear() {
-        java.util.Arrays.fill(lastRead, 0);
-        java.util.Arrays.fill(lastWrite, 0);
-        java.util.Arrays.fill(lastExec, 0);
+    /** age of a stamp in fade levels, or -1 if not lit */
+    private int level(long stamp) {
+        long age = now - stamp;
+        if (age < 0) return -1; // happened "later" (we went back in time)
+        long from = stepFrom;
+        if (from >= 0) return stamp > from ? 0 : -1;
+        long w = Math.max(1, window);
+        if (age >= w) return -1;
+        return (int) (age * flashFrames / w);
     }
 
     /** Kind of the freshest access still inside the flash window, or KIND_NONE. */
     public int kindAt(int addr, int[] levelOut) {
-        int n = flashFrames;
-        int ax = now - lastExec[addr], aw = now - lastWrite[addr], ar = now - lastRead[addr];
-        if (ax < n) {
-            levelOut[0] = ax;
+        int lx = level(lastExec[addr]);
+        if (lx >= 0) {
+            levelOut[0] = lx;
             return KIND_EXEC;
         }
-        boolean w = aw < n, r = ar < n;
-        if (w && r) {
-            levelOut[0] = Math.min(aw, ar);
+        int lw = level(lastWrite[addr]), lr = level(lastRead[addr]);
+        if (lw >= 0 && lr >= 0) {
+            levelOut[0] = Math.min(lw, lr);
             return KIND_RW;
         }
-        if (w) {
-            levelOut[0] = aw;
+        if (lw >= 0) {
+            levelOut[0] = lw;
             return KIND_WRITE;
         }
-        if (r) {
-            levelOut[0] = ar;
+        if (lr >= 0) {
+            levelOut[0] = lr;
             return KIND_READ;
         }
         return KIND_NONE;

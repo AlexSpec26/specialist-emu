@@ -68,6 +68,13 @@ public final class Specialist implements Bus {
     // keyboard: per column, bit per row; written from UI thread
     private final AtomicIntegerArray keyCols = new AtomicIntegerArray(SpecKeys.COLS);
     private volatile boolean shiftDown;
+    /**
+     * The keys the machine sees (read by the PPI). Copied from the live keys above at the start
+     * of every run slice; each change is logged with its time, so going back in time can replay
+     * the same keys exactly.
+     */
+    private final int[] curCols = new int[SpecKeys.COLS];
+    private boolean curShift;
     private final int[] pressCount = new int[SpecKeys.COUNT];
 
     // audio
@@ -105,6 +112,7 @@ public final class Specialist implements Bus {
 
     /** Clears all memory and resets (cold start). */
     public void hardReset() {
+        clearHistory();
         progStart = progEnd = -1;
         java.util.Arrays.fill(ram, (byte) 0);
         java.util.Arrays.fill(colorRam, (byte) 0);
@@ -129,7 +137,7 @@ public final class Specialist implements Bus {
 
     @Override
     public int read(int addr) {
-        if (trace.enabled) trace.lastRead[addr] = trace.now;
+        if (trace.enabled) trace.lastRead[addr] = stamp;
         if (addr < 0xC000) return ram[addr] & 0xFF;
         if (addr < 0xF000) return rom[addr - 0xC000] & 0xFF;
         if (addr >= 0xF800) return ppiRead(addr & 3);
@@ -138,7 +146,7 @@ public final class Specialist implements Bus {
 
     @Override
     public int fetch(int addr) {
-        if (trace.enabled) trace.lastExec[addr] = trace.now;
+        if (trace.enabled) trace.lastExec[addr] = stamp;
         if (addr < 0xC000) return ram[addr] & 0xFF;
         if (addr < 0xF000) return rom[addr - 0xC000] & 0xFF;
         if (addr >= 0xF800) return ppiRead(addr & 3);
@@ -147,7 +155,7 @@ public final class Specialist implements Bus {
 
     @Override
     public void write(int addr, int value) {
-        if (trace.enabled) trace.lastWrite[addr] = trace.now;
+        if (trace.enabled) trace.lastWrite[addr] = stamp;
         if (addr < 0xC000) {
             ram[addr] = (byte) value;
             if (addr >= 0x9000) colorRam[addr - 0x9000] = (byte) curColor;
@@ -181,7 +189,7 @@ public final class Specialist implements Bus {
     private int rowsForColumns(int cols) {
         int rows = 0;
         for (int j = 0; j < SpecKeys.COLS; j++)
-            if ((cols & (1 << j)) != 0) rows |= keyCols.get(j);
+            if ((cols & (1 << j)) != 0) rows |= curCols[j];
         return rows;
     }
 
@@ -189,7 +197,7 @@ public final class Specialist implements Bus {
         int cols = 0;
         if (rows == 0) return 0;
         for (int j = 0; j < SpecKeys.COLS; j++)
-            if ((keyCols.get(j) & rows) != 0) cols |= 1 << j;
+            if ((curCols[j] & rows) != 0) cols |= 1 << j;
         return cols;
     }
 
@@ -203,7 +211,7 @@ public final class Specialist implements Bus {
             case 1: {
                 if (!bIn) return portB;
                 int rows = rowsForColumns(selectedColumns());
-                return ((~rows & 0x3F) << 2) | (shiftDown ? 0 : 2) | (tapeBit() ? 1 : 0);
+                return ((~rows & 0x3F) << 2) | (curShift ? 0 : 2) | (tapeBit() ? 1 : 0);
             }
             case 2: {
                 int v = portC & 0xF0;
@@ -250,7 +258,7 @@ public final class Specialist implements Bus {
         if (to != tapeOut) {
             tapeOut = to;
             TapeOutListener l = tapeOutListener;
-            if (l != null) l.onTapeEdge(cycleCount, to);
+            if (l != null && !replaying()) l.onTapeEdge(cycleCount, to);
         }
         curColor = eff & 0xD0;
     }
@@ -311,10 +319,21 @@ public final class Specialist implements Bus {
     }
 
     public void runCycles(int cycles) {
-        int done = 0;
-        while (done < cycles) {
+        syncInput();
+        long end = cycleCount + cycles;
+        while (cycleCount < end) stepOne();
+    }
+
+    /** One instruction: history point, keys, trace stamp, CPU, sound. */
+    private void stepOne() {
+        if (historyOn && cycleCount >= nextSnapAt) pushSnap();
+        if (evPos < events.size()) replayInput();
+        stamp = cycleCount + 1;
+        lastInstrStart = cycleCount;
+        lastInstrPc = cpu.pc;
+        {
             int cyc = cpu.step();
-            done += cyc;
+            instr++;
             winCyc += cyc;
             cycleCount += cyc;
             if (beeper) winHi += cyc;
@@ -326,6 +345,230 @@ public final class Specialist implements Bus {
                 emitSample();
             }
         }
+    }
+
+    // ------------------------------------------------------------------ time control
+
+    /** time stamp given to the memory accesses of the current instruction (its start + 1) */
+    private long stamp;
+    /** instructions executed since the program was started (the unit of single steps) */
+    public long instr;
+    /** address and start time of the last executed instruction (pause screen, memory map) */
+    public volatile int lastInstrPc = -1;
+    public volatile long lastInstrStart = -1;
+
+    /** emulated time in CPU cycles */
+    public long time() {
+        return cycleCount;
+    }
+
+    /** Executes exactly one instruction. */
+    public void stepInstruction() {
+        syncInput();
+        stepOne();
+    }
+
+    /** Runs forward {@code t} cycles (whole instructions), no sound. */
+    public void forward(long t) {
+        syncInput();
+        long end = cycleCount + t;
+        while (cycleCount < end) stepOne();
+    }
+
+    /** Copies the live keys into the machine; logs a change (only outside a replay). */
+    private void syncInput() {
+        if (replaying()) return;
+        boolean changed = shiftDown != curShift;
+        for (int j = 0; j < SpecKeys.COLS && !changed; j++) changed = keyCols.get(j) != curCols[j];
+        if (!changed) return;
+        for (int j = 0; j < SpecKeys.COLS; j++) curCols[j] = keyCols.get(j);
+        curShift = shiftDown;
+        if (historyOn) {
+            KeyEvent e = new KeyEvent(cycleCount, curCols, curShift);
+            // a change at the same moment replaces the previous one
+            if (!events.isEmpty() && events.get(events.size() - 1).time == cycleCount) events.remove(events.size() - 1);
+            events.add(e);
+            evPos = events.size();
+        }
+    }
+
+    /** While replaying: apply the logged key changes that happened by now. */
+    private void replayInput() {
+        while (evPos < events.size() && events.get(evPos).time <= cycleCount) {
+            KeyEvent e = events.get(evPos++);
+            System.arraycopy(e.cols, 0, curCols, 0, SpecKeys.COLS);
+            curShift = e.shift;
+        }
+    }
+
+    /**
+     * true while re-running time that was already played: the keys come from the log (also at
+     * the very moment the replay reaches the point where we went back from).
+     */
+    private boolean replaying() {
+        return cycleCount < recordedEnd || evPos < events.size();
+    }
+
+    private static final class KeyEvent {
+        final long time;
+        final int[] cols;
+        final boolean shift;
+
+        KeyEvent(long time, int[] cols, boolean shift) {
+            this.time = time;
+            this.cols = cols.clone();
+            this.shift = shift;
+        }
+    }
+
+    /** machine state at an instruction boundary near a frame start */
+    private static final class Snap {
+        final byte[] ram = new byte[0xC000];
+        final byte[] colorRam = new byte[0x3000];
+        final int[] regs = new int[24];
+        final int[] cols = new int[SpecKeys.COLS];
+        long cycle, instr;
+    }
+
+    /** a snapshot every 10 frames (0,2 s) */
+    private static final int SNAP_CYCLES = CYCLES_PER_FRAME * 10;
+    /** history kept for going back: 310 snapshots = 62 s, at least a minute (about 19 MB) */
+    public static final int HISTORY = 310;
+    private final Snap[] hist = new Snap[HISTORY];
+    private int histHead, histCount;
+    private final java.util.ArrayList<KeyEvent> events = new java.util.ArrayList<>();
+    /** index of the first logged key change not yet applied */
+    private int evPos;
+    /** the furthest time reached; before it, time is being replayed */
+    private long recordedEnd;
+    private long nextSnapAt;
+    /** history is off while the microphone feeds the tape input (it cannot be replayed) */
+    private boolean historyOn = true;
+
+    private Snap snapAt(int k) { // k = 0 newest
+        return hist[(histHead + HISTORY - 1 - k) % HISTORY];
+    }
+
+    private void pushSnap() {
+        Snap s = hist[histHead];
+        if (s == null) s = hist[histHead] = new Snap();
+        histHead = (histHead + 1) % HISTORY;
+        if (histCount < HISTORY) histCount++;
+        System.arraycopy(ram, 0, s.ram, 0, ram.length);
+        System.arraycopy(colorRam, 0, s.colorRam, 0, colorRam.length);
+        I8080 c = cpu;
+        int[] r = s.regs;
+        int i = 0;
+        for (int v : new int[]{c.pc, c.sp, c.a, c.getF(), c.b, c.c, c.d, c.e, c.h, c.l, c.halted ? 1 : 0,
+            c.inte ? 1 : 0, c.pendingEi, portA, portB, portC, aIn ? 1 : 0, bIn ? 1 : 0, cLoIn ? 1 : 0,
+            cHiIn ? 1 : 0, curShift ? 1 : 0}) r[i++] = v;
+        System.arraycopy(curCols, 0, s.cols, 0, SpecKeys.COLS);
+        s.cycle = cycleCount;
+        s.instr = instr;
+        nextSnapAt = (cycleCount / SNAP_CYCLES + 1) * SNAP_CYCLES;
+        // key changes older than the oldest snapshot are no longer needed
+        if (histCount == HISTORY && !events.isEmpty()) {
+            long oldest = snapAt(HISTORY - 1).cycle;
+            int drop = 0;
+            while (drop < events.size() && events.get(drop).time <= oldest) drop++;
+            if (drop > 64) {
+                events.subList(0, drop).clear();
+                evPos = Math.max(0, evPos - drop);
+            }
+        }
+    }
+
+    private void restore(Snap s) {
+        System.arraycopy(s.ram, 0, ram, 0, ram.length);
+        System.arraycopy(s.colorRam, 0, colorRam, 0, colorRam.length);
+        I8080 c = cpu;
+        int[] r = s.regs;
+        c.pc = r[0]; c.sp = r[1]; c.a = r[2]; c.setF(r[3]); c.b = r[4]; c.c = r[5]; c.d = r[6]; c.e = r[7];
+        c.h = r[8]; c.l = r[9]; c.halted = r[10] != 0; c.inte = r[11] != 0; c.pendingEi = r[12];
+        portA = r[13]; portB = r[14]; portC = r[15];
+        aIn = r[16] != 0; bIn = r[17] != 0; cLoIn = r[18] != 0; cHiIn = r[19] != 0; curShift = r[20] != 0;
+        System.arraycopy(s.cols, 0, curCols, 0, SpecKeys.COLS);
+        cycleCount = s.cycle;
+        instr = s.instr;
+        applyPortC(); // colour, beeper, tape out from port C (no tape event: we are replaying)
+        lastInstrPc = -1;
+        lastInstrStart = -1;
+        // the keys logged after this point are replayed
+        int lo = 0, hi = events.size();
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (events.get(mid).time <= cycleCount) lo = mid + 1;
+            else hi = mid;
+        }
+        evPos = lo;
+        // snapshots after this point are made again by the replay
+        while (histCount > 1 && snapAt(0).cycle > cycleCount) {
+            histHead = (histHead + HISTORY - 1) % HISTORY;
+            histCount--;
+        }
+        nextSnapAt = (cycleCount / SNAP_CYCLES + 1) * SNAP_CYCLES;
+    }
+
+    /** latest snapshot at or before both targets; the oldest one if none; null if no history */
+    private Snap findSnap(long targetInstr, long targetCycle) {
+        Snap best = null;
+        for (int k = 0; k < histCount; k++) {
+            Snap s = snapAt(k);
+            best = s;
+            if (s.instr <= targetInstr && s.cycle <= targetCycle) return s;
+        }
+        return best;
+    }
+
+    private boolean goBack(long targetInstr, long targetCycle) {
+        Snap s = findSnap(targetInstr, targetCycle);
+        if (s == null) return false;
+        recordedEnd = Math.max(recordedEnd, cycleCount);
+        boolean ok = s.instr <= targetInstr && s.cycle <= targetCycle;
+        restore(s);
+        audioOut = null;
+        while (instr < targetInstr && cycleCount < targetCycle) stepOne();
+        return ok;
+    }
+
+    /** Goes back {@code n} instructions; false if the history does not reach (the oldest point is kept). */
+    public boolean backInstructions(long n) {
+        return goBack(instr - n, Long.MAX_VALUE);
+    }
+
+    /** Goes back {@code t} cycles (to an instruction boundary); false if the history does not reach. */
+    public boolean backTime(long t) {
+        return goBack(Long.MAX_VALUE, cycleCount - t);
+    }
+
+    /** After going back, going forward replays what happened; this makes the live keys count again. */
+    public void forgetFuture() {
+        if (!replaying()) return;
+        recordedEnd = cycleCount;
+        while (events.size() > evPos) events.remove(events.size() - 1);
+    }
+
+    /** seconds of history available */
+    public float historySeconds() {
+        if (histCount == 0) return 0;
+        return (cycleCount - snapAt(histCount - 1).cycle) / (float) CPU_HZ;
+    }
+
+    /** Forgets the history (new program, loaded state, microphone input). */
+    public void clearHistory() {
+        histCount = 0;
+        histHead = 0;
+        events.clear();
+        evPos = 0;
+        recordedEnd = 0;
+        nextSnapAt = cycleCount;
+    }
+
+    /** History is kept only when the tape input is not live (the microphone cannot be replayed). */
+    public void setHistoryEnabled(boolean on) {
+        if (on == historyOn) return;
+        historyOn = on;
+        clearHistory();
     }
 
     private void emitSample() {
@@ -451,6 +694,7 @@ public final class Specialist implements Bus {
         }
         progStart = beg;
         progEnd = end;
+        clearHistory();
         return new RksInfo(beg, end, csOk);
     }
 
@@ -498,5 +742,8 @@ public final class Specialist implements Bus {
         cHiIn = in.readBoolean();
         applyPortC();
         releaseAllKeys();
+        java.util.Arrays.fill(curCols, 0);
+        curShift = false;
+        clearHistory();
     }
 }

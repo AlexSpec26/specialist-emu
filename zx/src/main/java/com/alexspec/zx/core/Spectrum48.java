@@ -142,7 +142,7 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         java.util.Arrays.fill(scriptRows, 0);
         reset();
         frameOpen = false;
-        histCount = 0;
+        clearHistory();
     }
 
     // ------------------------------------------------------------------ bus
@@ -345,14 +345,17 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         scriptFrame();
         wasLoading = false;
         frameOpen = true;
-        if (historyOn) pushHistory();
+        if (historyOn) {
+            if (!replaying) logKeys();
+            if (frameCount % SNAP_EVERY == 0) pushHistory();
+        }
         if (replaying) {
             // use the keys that were held when this frame really ran
             long now = time();
-            for (int k = 0; k < histCount; k++) {
-                Snap h = hist[(histHead + HISTORY - 1 - k) % HISTORY];
-                if (h.abs <= now) {
-                    System.arraycopy(h.keys, 0, replayKeys, 0, 9);
+            for (int k = 0; k < keyCount; k++) {
+                int i = (keyHead + KEYLOG - 1 - k) % KEYLOG;
+                if (keyAbs[i] <= now) {
+                    System.arraycopy(keyLog[i], 0, replayKeys, 0, 9);
                     break;
                 }
             }
@@ -478,8 +481,6 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
     private static final class Snap {
         final byte[] ram = new byte[0xC000];
         final int[] regs = new int[40];
-        /** keys held during this frame (8 half-rows + Kempston), replayed when going back */
-        final int[] keys = new int[9];
         long instr, cycles, abs;
         Tape tape;
         long[] tapeState;
@@ -487,8 +488,33 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         final int[] scriptRows = new int[8];
     }
 
-    /** frames kept for going back (10 s) */
-    public static final int HISTORY = 500;
+    /** a full snapshot every 5 frames (0,1 s); going back replays at most 5 frames */
+    private static final int SNAP_EVERY = 5;
+    /** snapshots kept for going back: 620 x 5 frames = 62 s, at least a minute (about 30 MB) */
+    public static final int HISTORY = 620;
+    /**
+     * Keys held in every frame (8 half-rows + Kempston) with the frame's start time: replayed when
+     * going back. A little more than the snapshots cover.
+     */
+    private static final int KEYLOG = HISTORY * SNAP_EVERY + 100;
+    private final long[] keyAbs = new long[KEYLOG];
+    private final int[][] keyLog = new int[KEYLOG][9];
+    private int keyHead, keyCount;
+
+    private void logKeys() {
+        long now = time();
+        // after going back, the frames logged from here on are played again: drop them
+        while (keyCount > 0 && keyAbs[(keyHead + KEYLOG - 1) % KEYLOG] >= now) {
+            keyHead = (keyHead + KEYLOG - 1) % KEYLOG;
+            keyCount--;
+        }
+        int i = keyHead;
+        keyAbs[i] = now;
+        for (int k = 0; k < 8; k++) keyLog[i][k] = rows.get(k);
+        keyLog[i][8] = kempston;
+        keyHead = (keyHead + 1) % KEYLOG;
+        if (keyCount < KEYLOG) keyCount++;
+    }
     private final Snap[] hist = new Snap[HISTORY];
     private int histHead, histCount;
     public volatile boolean historyOn = true;
@@ -511,8 +537,6 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
             c.ix, c.iy, c.sp, c.pc, c.i, c.getR(), c.memptr, c.im, c.iff1 ? 1 : 0, c.iff2 ? 1 : 0, c.halted ? 1 : 0,
             c.eiDelay ? 1 : 0, (int) c.t, border, ear ? 1 : 0, mic ? 1 : 0, frameStartBorder, frameCount,
             romLoaderFrames, progStart, progEnd, scriptPos, scriptTimer}) r[i++] = v;
-        for (int k = 0; k < 8; k++) s.keys[k] = rows.get(k);
-        s.keys[8] = kempston;
         s.instr = instr;
         s.cycles = cycleCount;
         s.abs = time();
@@ -587,6 +611,7 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
 
     public void clearHistory() {
         histCount = 0;
+        keyCount = 0;
     }
 
     /** where the beam is now, in screen pixels {x, y}; null during vertical blanking */
@@ -899,7 +924,7 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         script = null;
         java.util.Arrays.fill(scriptRows, 0);
         frameOpen = false;
-        histCount = 0;
+        clearHistory();
         releaseAllKeys();
     }
 }

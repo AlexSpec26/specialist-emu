@@ -33,6 +33,9 @@ final class MainView extends View {
         void onKeyPicked(int code);
 
         void onPickCancelled();
+
+        /** pause controls: 0 = 1 s back, 1 = one instruction back, 2 = one forward, 3 = 1 s forward */
+        void onStep(int kind);
     }
 
     private static final int T_NONE = -1;
@@ -43,6 +46,7 @@ final class MainView extends View {
     private static final int T_SCREEN = -6;
     private static final int T_MAP = -7;
     private static final int T_PANEL = -8;
+    private static final int T_STEP = 3000;
     private static final int T_BUTTON = 1000;
     private static final int T_KEY = 2000;
 
@@ -80,6 +84,16 @@ final class MainView extends View {
     /** called when the tutorial is closed (so the owner can re-layout) */
     Runnable onTutorialClosed;
     private final RectF menuRect = new RectF();
+    private final RectF[] stepRects = {new RectF(), new RectF(), new RectF(), new RectF()};
+    private static final String[] STEP_LABELS = {"⏪ 1 с", "◀ 1", "1 ▶", "1 с ⏩"};
+    /** the instruction and registers are shown until this time (ms), after a step */
+    private long infoUntil;
+
+    /** show the last and next instruction with the registers for 4 seconds (after a step) */
+    void showMachineInfo() {
+        infoUntil = System.currentTimeMillis() + 4000;
+        invalidate();
+    }
     private final RectF kbdBtnRect = new RectF();
     private final RectF kbdRect = new RectF();
     private final RectF joyZone = new RectF();
@@ -416,17 +430,8 @@ final class MainView extends View {
         }
         screenBmp.setPixels(pixels, 0, Specialist.WIDTH, 0, 0, Specialist.WIDTH, Specialist.HEIGHT);
         c.drawBitmap(screenBmp, srcRect, screenRect, bmpPaint);
-        if (paused && machine.isRomLoaded()) {
-            fill.setColor(0x99000000);
-            c.drawRect(screenRect, fill);
-            text.setColor(Color.WHITE);
-            text.setTextSize(Math.min(screenRect.height() * 0.14f, 40 * dp));
-            c.drawText("❚❚  ПАУЗА", screenRect.centerX(), screenRect.centerY(), text);
-            text.setTextSize(Math.min(screenRect.height() * 0.06f, 15 * dp));
-            text.setColor(0xFFBBBBC5);
-            c.drawText("нажмите на экран, чтобы продолжить", screenRect.centerX(),
-                    screenRect.centerY() + screenRect.height() * 0.12f, text);
-        }
+        // pause: only a small translucent sign in the middle; the step buttons are outside the picture
+        if (paused && machine.isRomLoaded() && pickPrompt == null) drawPauseSign(c);
         if (tape != null) drawTapeIndicator(c);
         if (Math.abs(speed - 1f) > 0.001f) {
             String sp = "1/" + Math.round(1f / speed);
@@ -449,7 +454,7 @@ final class MainView extends View {
         if (toolbarY >= 0) {
             fill.setColor(0xFF15151A);
             c.drawRect(0, toolbarY, getWidth(), toolbarY + toolbarH, fill);
-            if (title != null && !title.isEmpty()) {
+            if (title != null && !title.isEmpty() && !(paused && pickPrompt == null && machine.isRomLoaded())) {
                 text.setTextSize(15 * dp);
                 text.setColor(0xFF9A9AA5);
                 String t = title;
@@ -468,6 +473,99 @@ final class MainView extends View {
         }
         if (keyboardVisible) drawKeyboard(c);
         else if (!(mapVisible && map.isTutorialActive())) drawControls(c);
+        if (paused && pickPrompt == null && machine.isRomLoaded()) drawStepButtons(c);
+        if (System.currentTimeMillis() < infoUntil) drawMachineInfo(c); // 4 s after a step
+    }
+
+    /** a small translucent pause sign in the middle of the picture */
+    private void drawPauseSign(Canvas c) {
+        float r = Math.min(26 * dp, screenRect.height() * 0.09f);
+        float cx = screenRect.centerX(), cy = screenRect.centerY();
+        fill.setColor(0x55000000);
+        c.drawCircle(cx, cy, r, fill);
+        fill.setColor(0x88FFFFFF);
+        float bw = r * 0.22f, bh = r * 0.9f, gap = r * 0.16f;
+        c.drawRect(cx - gap - bw, cy - bh / 2, cx - gap, cy + bh / 2, fill);
+        c.drawRect(cx + gap, cy - bh / 2, cx + gap + bw, cy + bh / 2, fill);
+    }
+
+    /**
+     * Step buttons outside the picture: portrait — in the toolbar instead of the title;
+     * landscape — two on each side of the picture, under ☰ and ⌨.
+     */
+    private void layoutStepButtons() {
+        float gap = 6 * dp;
+        if (toolbarY >= 0) {
+            float left = menuRect.right + gap, right = kbdBtnRect.left - gap;
+            float w = (right - left - gap * 3) / 4f;
+            for (int i = 0; i < 4; i++) {
+                float x = left + i * (w + gap);
+                stepRects[i].set(x, menuRect.top, x + w, menuRect.bottom);
+            }
+        } else {
+            float h = 44 * dp;
+            for (int i = 0; i < 2; i++) {
+                float y = menuRect.bottom + gap + i * (h + gap);
+                stepRects[i].set(menuRect.left, y, screenRect.left - gap, y + h);
+                stepRects[i + 2].set(screenRect.right + gap, y, kbdBtnRect.right, y + h);
+            }
+        }
+    }
+
+    private void drawStepButtons(Canvas c) {
+        layoutStepButtons();
+        for (int i = 0; i < 4; i++) {
+            RectF r = stepRects[i];
+            fill.setColor(0xDD2A3A80);
+            c.drawRoundRect(r, 9 * dp, 9 * dp, fill);
+            text.setColor(Color.WHITE);
+            float ts = Math.min(r.height() * 0.42f, 16 * dp);
+            text.setTextSize(ts);
+            float tw = text.measureText(STEP_LABELS[i]);
+            if (tw > r.width() * 0.9f) text.setTextSize(ts * r.width() * 0.9f / tw);
+            c.drawText(STEP_LABELS[i], r.centerX(), r.centerY() + text.getTextSize() * 0.36f, text);
+        }
+    }
+
+    /** the last and the next instruction with the registers (8080) */
+    private void drawMachineInfo(Canvas c) {
+        com.alexspec.specialist.core.I8080 z = machine.cpu;
+        int[] len = new int[1];
+        String ins = com.alexspec.specialist.core.Dis8080.dis(machine::rawRead, z.pc, len);
+        StringBuilder hex = new StringBuilder();
+        for (int k = 0; k < len[0]; k++) hex.append(String.format("%02X", machine.rawRead((z.pc + k) & 0xFFFF)));
+        String l1 = String.format(java.util.Locale.US, "→ %04X  %-6s %s", z.pc, hex, ins);
+        int lp = machine.lastInstrPc;
+        String l0 = lp < 0 ? "" : String.format(java.util.Locale.US, "✓ %04X  %s", lp,
+                com.alexspec.specialist.core.Dis8080.dis(machine::rawRead, lp, null));
+        int f = z.getF();
+        StringBuilder flags = new StringBuilder();
+        String names = "SZ-A-P-C";
+        for (int k = 0; k < 8; k++) if (names.charAt(k) != '-') flags.append((f & (0x80 >> k)) != 0 ? names.charAt(k) : '·');
+        String l2 = String.format(java.util.Locale.US, "A %02X  BC %02X%02X  DE %02X%02X  HL %02X%02X", z.a, z.b, z.c, z.d, z.e, z.h, z.l);
+        String l3 = String.format(java.util.Locale.US, "SP %04X  %s  %s", z.sp, flags, z.inte ? "EI" : "DI");
+        long t = machine.time();
+        String l4 = String.format(java.util.Locale.US, "команда %d, такт %d (%.2f с)", machine.instr, t, t / (double) Specialist.CPU_HZ);
+        String[] lines = l0.isEmpty() ? new String[]{l1, l2, l3, l4} : new String[]{l0, l1, l2, l3, l4};
+        android.graphics.Typeface old = text.getTypeface();
+        text.setTypeface(android.graphics.Typeface.MONOSPACE);
+        text.setTextAlign(Paint.Align.LEFT);
+        float ts = Math.min(13 * dp, screenRect.width() / 30f);
+        text.setTextSize(ts);
+        float lh = ts * 1.25f, pad = 5 * dp, maxW = 0;
+        for (String l : lines) maxW = Math.max(maxW, text.measureText(l));
+        // portrait: under the toolbar, off the picture; landscape: no room outside, top-left corner
+        float bx = screenRect.left + 6 * dp, by = toolbarY >= 0 ? toolbarY + toolbarH + 6 * dp : screenRect.top + 6 * dp;
+        fill.setColor(0xD0101018);
+        c.drawRoundRect(bx, by, bx + maxW + 2 * pad, by + lh * lines.length + pad, 6 * dp, 6 * dp, fill);
+        for (int i = 0; i < lines.length; i++) {
+            boolean next = lines[i].startsWith("→"), done = lines[i].startsWith("✓");
+            text.setColor(next ? 0xFFFFFF60 : done ? 0xFF20E8FF : 0xFFD0D0DA);
+            c.drawText(lines[i], bx + pad, by + pad + (i + 0.8f) * lh, text);
+        }
+        text.setTextAlign(Paint.Align.CENTER);
+        text.setTypeface(old);
+        postInvalidateDelayed(Math.max(16, infoUntil - System.currentTimeMillis()));
     }
 
     private void drawUiButton(Canvas c, RectF r, String label, boolean active) {
@@ -608,6 +706,10 @@ final class MainView extends View {
     private int hitTest(float x, float y) {
         if (inflate(menuRect, 8 * dp).contains(x, y)) return T_MENU;
         if (inflate(kbdBtnRect, 8 * dp).contains(x, y)) return T_KBD;
+        if (paused && pickPrompt == null && machine.isRomLoaded()) {
+            layoutStepButtons();
+            for (int i = 0; i < 4; i++) if (stepRects[i].contains(x, y)) return T_STEP + i;
+        }
         if (screenRect.contains(x, y) && !(keyboardVisible && kbdRect.contains(x, y))) return T_SCREEN;
         if (keyboardVisible) {
             if (kbdRect.contains(x, y)) {
@@ -730,6 +832,12 @@ final class MainView extends View {
     }
 
     private void press(int id, int t, float x, float y) {
+        if (t >= T_STEP) {
+            haptic();
+            host.onStep(t - T_STEP);
+            showMachineInfo();
+            return;
+        }
         if (t == T_MENU || t == T_KBD || t == T_SCREEN) {
             haptic();
             return;
@@ -787,6 +895,7 @@ final class MainView extends View {
     }
 
     private void release(int id, int t) {
+        if (t >= T_STEP) return;
         if (t == T_MAP) {
             map.up(id, lastUpX, lastUpY);
             return;

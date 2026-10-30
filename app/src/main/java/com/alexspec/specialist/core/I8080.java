@@ -36,7 +36,8 @@ public final class I8080 {
     public boolean fs, fz, fac, fp, fcy;
     public boolean halted;
     public boolean inte;
-    private int pendingEi;
+    /** EI takes effect after the next instruction; package-private for the history snapshots */
+    int pendingEi;
 
     public I8080(Bus bus) {
         this.bus = bus;

@@ -235,11 +235,13 @@ static void test_steps(const char *demo) {
     engine_forward(t - engine_time());
     assert(hash_ram() != h);
 
-    /* history: about 10 s back, not more */
-    for (int k = 0; k < 700; k++) frames(1);
+    /* history: at least a minute back, not more */
+    for (int k = 0; k < 3300; k++) frames(1);
     double hs = engine_history_seconds();
-    assert(hs > 9 && hs < 11.5);
-    assert(!engine_back_time(15LL * ENGINE_CPU_HZ));
+    assert(hs >= 60 && hs < 63.5); /* at least a minute */
+    long long before = engine_time();
+    assert(engine_back_time(55LL * ENGINE_CPU_HZ) && before - engine_time() <= 55LL * ENGINE_CPU_HZ);
+    assert(!engine_back_time(20LL * ENGINE_CPU_HZ));
     puts("STEPS FORWARD/BACK + SECONDS BACK/FORWARD + TRACE OK");
 }
 

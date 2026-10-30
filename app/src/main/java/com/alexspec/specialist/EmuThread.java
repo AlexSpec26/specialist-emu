@@ -40,6 +40,8 @@ final class EmuThread extends Thread {
     volatile float speed = 1f;
     volatile boolean sound = true;
     volatile int colorMode = Specialist.COLOR_WHITE;
+    /** single-step mode (paused and stepping): only the last instruction lights up on the map */
+    volatile boolean stepping;
 
     EmuThread(FrameListener listener) {
         super("Specialist");
@@ -165,13 +167,11 @@ final class EmuThread extends Thread {
 
             float sp = Math.max(0.01f, Math.min(1f, speed));
             int cycles = Math.round(Specialist.CYCLES_PER_FRAME * sp);
+            // the microphone cannot be replayed: no history while it feeds the tape input
+            machine.setHistoryEnabled(machine.tapeInput == null);
             int samples = machine.run(audioBuf, cycles);
             machine.render(back, colorMode);
-            // the trace clock follows real time, so flashes last the same at any emulation speed
-            if (machine.trace.enabled) {
-                machine.trace.tick();
-                if ((++frameCount & 1) == 0) renderMap(); // 25 Hz is plenty for the map
-            }
+            if (machine.trace.enabled && (++frameCount & 1) == 0) renderMap(); // 25 Hz is plenty for the map
             publish();
 
             boolean useAudio = sound && track != null;
@@ -220,9 +220,17 @@ final class EmuThread extends Thread {
     }
 
     private void renderMap() {
-        if (!machine.trace.enabled) return;
-        int layout = machine.trace.layout;
-        machine.trace.render(machine, mapBack, layout);
+        com.alexspec.specialist.core.MemTrace tr = machine.trace;
+        if (!tr.enabled) return;
+        int layout = tr.layout;
+        tr.now = machine.time();
+        // a flash lasts the same in real time at any speed, but at least one instruction
+        float sp = Math.max(0.01f, Math.min(1f, speed));
+        long w = (long) (tr.flashFrames / 50.0 * sp * Specialist.CPU_HZ);
+        long last = machine.lastInstrStart;
+        tr.window = Math.max(w, last < 0 ? 1 : tr.now - last + 1);
+        tr.stepFrom = stepping && last >= 0 ? last : -1;
+        tr.render(machine, mapBack, layout);
         int n = com.alexspec.specialist.core.MemTrace.width(layout) * com.alexspec.specialist.core.MemTrace.height(layout);
         synchronized (mapFrame) {
             System.arraycopy(mapBack, 0, mapFrame, 0, n);
