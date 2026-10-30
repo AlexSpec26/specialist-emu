@@ -65,7 +65,8 @@ final class MainView extends View {
     String title = "";
     /** Shown as an overlay; the emulation itself is paused by the activity. */
     boolean paused;
-    float speed = 1f;
+    /** speed shown in the corner (×2, 1/8, 5 т/с …); null at real speed */
+    String speedBadge;
     /** live memory map under the screen (portrait only) */
     boolean mapOn;
     /** live tape input (microphone), for the level indicator; null when off */
@@ -433,8 +434,8 @@ final class MainView extends View {
         // pause: only a small translucent sign in the middle; the step buttons are outside the picture
         if (paused && machine.isRomLoaded() && pickPrompt == null) drawPauseSign(c);
         if (tape != null) drawTapeIndicator(c);
-        if (Math.abs(speed - 1f) > 0.001f) {
-            String sp = "1/" + Math.round(1f / speed);
+        if (speedBadge != null) {
+            String sp = speedBadge;
             text.setTextSize(13 * dp);
             float tw = text.measureText(sp) + 12 * dp;
             fill.setColor(0xCC3A5BD9);

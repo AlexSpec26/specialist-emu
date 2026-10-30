@@ -36,8 +36,11 @@ final class EmuThread extends Thread {
     private volatile boolean running = true;
     private volatile boolean paused = true;
     private volatile boolean userPaused;
-    /** Emulation speed relative to the real machine, 0.01 (1/100) .. 1. */
-    volatile float speed = 1f;
+    /** Emulation speed relative to the real machine: ×4 down to one 8080 clock per second (Speed). */
+    volatile double speed = 1;
+    /** clocks owed to the emulation (fractions and the overshoot of whole instructions carry over) */
+    private double owed;
+    private double lastSpeed = 1;
     volatile boolean sound = true;
     volatile int colorMode = Specialist.COLOR_WHITE;
     /** single-step mode (paused and stepping): only the last instruction lights up on the map */
@@ -165,11 +168,23 @@ final class EmuThread extends Thread {
                 continue;
             }
 
-            float sp = Math.max(0.01f, Math.min(1f, speed));
-            int cycles = Math.round(Specialist.CYCLES_PER_FRAME * sp);
+            double sp = Math.max(1.0 / Specialist.CPU_HZ, Math.min(4, speed));
+            if (sp != lastSpeed) {
+                owed = 0;
+                lastSpeed = sp;
+            }
             // the microphone cannot be replayed: no history while it feeds the tape input
             machine.setHistoryEnabled(machine.tapeInput == null);
-            int samples = machine.run(audioBuf, cycles);
+            // ×2 / ×4 run two / four frames' worth per real frame (their sound squeezed into it);
+            // slow speeds run a part of a frame, below 4 clocks per frame not every frame
+            owed += Specialist.CYCLES_PER_FRAME * sp;
+            int samples = 0;
+            if (owed >= 1) {
+                long before = machine.time();
+                samples = machine.run(audioBuf, (int) owed);
+                owed -= machine.time() - before; // whole instructions: may go below zero, then we wait
+            }
+            if (sp < 1.0 / 64) samples = 0; // far too slow to be heard
             machine.render(back, colorMode);
             if (machine.trace.enabled && (++frameCount & 1) == 0) renderMap(); // 25 Hz is plenty for the map
             publish();
@@ -225,7 +240,7 @@ final class EmuThread extends Thread {
         int layout = tr.layout;
         tr.now = machine.time();
         // a flash lasts the same in real time at any speed, but at least one instruction
-        float sp = Math.max(0.01f, Math.min(1f, speed));
+        double sp = Math.max(1.0 / Specialist.CPU_HZ, Math.min(4, speed));
         long w = (long) (tr.flashFrames / 50.0 * sp * Specialist.CPU_HZ);
         long last = machine.lastInstrStart;
         tr.window = Math.max(w, last < 0 ? 1 : tr.now - last + 1);
