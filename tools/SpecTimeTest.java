@@ -141,6 +141,35 @@ public final class SpecTimeTest {
         tr.stepInstruction();
         check(tr.trace.lastExec[pc] == tr.lastInstrStart + 1, "trace stamp of the executed instruction");
         System.out.println("TRACE OK");
+
+        // 7. saves: version 2 (build 24 and from build 29) restores exactly; version 1 (builds
+        // 25..28: the same without the 60-byte tail) is still read
+        Specialist sv = boot(rom);
+        for (int f = 0; f < 40; f++) sv.runFrame(audio);
+        byte[] st = sv.saveState();
+        check(st[7] == 2, "saves are version 2");
+        for (int f = 0; f < 50; f++) sv.runFrame(audio);
+        long after = hash(sv);
+        Specialist ld = boot(rom);
+        for (int f = 0; f < 77; f++) ld.runFrame(audio);
+        ld.loadState(st);
+        for (int f = 0; f < 50; f++) ld.runFrame(audio);
+        check(hash(ld) == after, "a version 2 save continues exactly");
+        byte[] v1 = Arrays.copyOf(st, st.length - 60);
+        v1[7] = 1;
+        ld.loadState(st);
+        long atSave = hash(ld);
+        for (int f = 0; f < 9; f++) ld.runFrame(audio);
+        ld.loadState(v1);
+        check(hash(ld) == atSave, "a version 1 save is read");
+        boolean refused = false;
+        try {
+            ld.loadState(Arrays.copyOf(st, st.length - 61));
+        } catch (java.io.IOException e) {
+            refused = true;
+        }
+        check(refused, "a truncated save is refused");
+        System.out.println("SAVE FORMATS OK");
         System.out.println("SPEC TIME CONTROL OK");
     }
 }

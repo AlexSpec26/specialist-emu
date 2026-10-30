@@ -701,7 +701,8 @@ public final class Specialist implements Bus {
     // ------------------------------------------------------------------ save states
 
     private static final int STATE_MAGIC = 0x53504543; // "SPEC"
-    private static final int STATE_VERSION = 1;
+    /** 1: up to build 23 and in builds 25..28; 2: build 24 and from build 29 on. Both are read. */
+    private static final int STATE_VERSION = 2;
 
     public byte[] saveState() {
         try {
@@ -719,6 +720,15 @@ public final class Specialist implements Bus {
             out.writeBoolean(bIn);
             out.writeBoolean(cLoIn);
             out.writeBoolean(cHiIn);
+            // version 2 (the layout of the build-24 preview): the EI delay and the sound state
+            out.writeInt(cpu.pendingEi);
+            out.writeLong(cycleCount);
+            out.writeLong(instr);
+            out.writeLong(sampleAcc);
+            out.writeInt(winCyc); out.writeInt(winHi);
+            out.writeInt(winTapeOut); out.writeInt(winTapeIn);
+            out.writeFloat(hpPrevIn); out.writeFloat(hpPrevOut);
+            out.writeInt(-1); out.writeInt(-1); // program bounds (build 24), not kept
             out.flush();
             return bos.toByteArray();
         } catch (IOException e) {
@@ -728,8 +738,12 @@ public final class Specialist implements Bus {
 
     public void loadState(byte[] state) throws IOException {
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(state));
-        if (in.readInt() != STATE_MAGIC || in.readInt() != STATE_VERSION)
-            throw new IOException("Неверный файл состояния");
+        if (in.readInt() != STATE_MAGIC) throw new IOException("Неверный файл состояния");
+        int version = in.readInt();
+        if (version < 1 || version > STATE_VERSION) throw new IOException("Неверный файл состояния");
+        // a truncated file must not half-overwrite the running machine
+        int size = 8 + 14 + ram.length + colorRam.length + 7 + (version >= 2 ? 60 : 0);
+        if (state.length < size) throw new IOException("Неполный файл состояния");
         cpu.load(in);
         in.readFully(ram);
         in.readFully(colorRam);
@@ -740,6 +754,17 @@ public final class Specialist implements Bus {
         bIn = in.readBoolean();
         cLoIn = in.readBoolean();
         cHiIn = in.readBoolean();
+        if (version >= 2) {
+            cpu.pendingEi = in.readInt();
+            in.readLong(); // the saved time: our own time keeps running, the history starts anew
+            in.readLong();
+            sampleAcc = in.readLong();
+            winCyc = in.readInt(); winHi = in.readInt();
+            winTapeOut = in.readInt(); winTapeIn = in.readInt();
+            hpPrevIn = in.readFloat(); hpPrevOut = in.readFloat();
+        } else {
+            cpu.pendingEi = 0;
+        }
         applyPortC();
         releaseAllKeys();
         java.util.Arrays.fill(curCols, 0);
