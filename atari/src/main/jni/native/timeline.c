@@ -186,6 +186,11 @@ static int frame_or_stop(const EngineInput *in)
 	if (setjmp(stop_jump)) {
 		stop_armed = 0;
 		update_hooks();
+		/* ANTIC was left in the middle of a scan line. The machine is never continued from
+		 * here (the frame is run again from its start), but code outside the frame loop -
+		 * reset, a new machine - must not see "drawing": ANTIC_PutByte would then index the
+		 * cycle maps with the stale position. ANTIC_Frame sets this again at its start. */
+		ANTIC_cur_screen_pos = ANTIC_NOT_DRAWING;
 		return 1;
 	}
 	engine_frame_body(in);
@@ -393,6 +398,16 @@ void engine_trace_copy(long long *reads, long long *writes, long long *execs)
 	if (reads) memcpy(reads, ALEX_last_read, sizeof(ALEX_last_read));
 	if (writes) memcpy(writes, ALEX_last_write, sizeof(ALEX_last_write));
 	if (execs) memcpy(execs, ALEX_last_exec, sizeof(ALEX_last_exec));
+}
+
+/* Before something acts on the machine from outside the timeline (reset, loading a state):
+   go back to the start of the frame we are stopped in, a consistent machine. */
+void timeline_leave_frame(void)
+{
+	if (!mid) return;
+	if (have_scratch) snap_restore(&scratch);
+	mid = 0;
+	pos_time = frame_base(cur_frame);
 }
 
 /* While stopped inside a frame, the machine itself is not in a savable state: a save stores the

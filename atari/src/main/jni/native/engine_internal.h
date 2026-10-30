@@ -21,4 +21,5 @@ int engine_snapshot_load(const void *data, size_t size);
 void timeline_reset(void);
 void timeline_free(void);
 const void *timeline_mid_frame_snapshot(void);
+void timeline_leave_frame(void);
 #endif
