@@ -1,5 +1,5 @@
 # Current handoff
-- Updated at (UTC): 2026-10-26
+- Updated at (UTC): 2026-11-07
 - Outgoing agent: Claude (Claude Code, облачная сессия)
 - Branch: main (ATARI-007 слита через PR #4 из `claude/atari-homogenize`)
 - Last pushed commit: см. `git log -1`
@@ -9,6 +9,8 @@
   spectrum - нет карты памяти, замедления и остального. можешь гомогенизировать?»
 
 ## What changed and why
+- UX-002 (2026-11-07): «Специалист» — без оверлеев на картинке, полоса команды после шага,
+  новая клавиатура, пинч карты шире её, кнопки Android в вертикали, горизонталь только для игры.
 - SPEC-BUG-002 (PR #9, build-30): build-28 не читала сохранения версии 2 из build-24 (ветка Codex) и потеряла её
   ползунок скорости. Теперь сохранения v2 (читаются v1 и v2), ползунок ×4…1 такт/с как в ZX.
 - SPEC-020, HIST-001 (PR #8; build-28, zx-build-12, atari-build-21): пауза «Специалиста» как у ZX
