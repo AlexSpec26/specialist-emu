@@ -156,22 +156,45 @@ public final class EmuActivity extends Activity implements MainView.Host {
         }
     }
 
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration cfg) {
+        super.onConfigurationChanged(cfg);
+        hideSystemBars();
+    }
+
+    /**
+     * Landscape (just for playing): the whole screen, bars appear on a swipe. Portrait: the
+     * status bar is hidden but Android's navigation buttons stay visible all the time; the
+     * view keeps clear of them (MainView.onApplyWindowInsets).
+     */
     @SuppressWarnings("deprecation")
     private void hideSystemBars() {
+        boolean land = getResources().getConfiguration().orientation
+                == android.content.res.Configuration.ORIENTATION_LANDSCAPE;
         if (Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
             WindowInsetsController c = getWindow().getInsetsController();
             if (c != null) {
-                c.hide(WindowInsets.Type.systemBars());
-                c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                if (land) {
+                    c.hide(WindowInsets.Type.systemBars());
+                    c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                } else {
+                    c.hide(WindowInsets.Type.statusBars());
+                    c.show(WindowInsets.Type.navigationBars());
+                    c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                }
             }
         } else {
-            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
-                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+            int f = View.SYSTEM_UI_FLAG_FULLSCREEN
                     | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                     | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
+            if (land) f |= View.SYSTEM_UI_FLAG_HIDE_NAVIGATION;
+            getWindow().getDecorView().setSystemUiVisibility(f);
+            getWindow().setNavigationBarColor(0xFF000000);
         }
+        if (Build.VERSION.SDK_INT >= 30) getWindow().setNavigationBarColor(0xFF000000);
+        view.requestApplyInsets();
     }
 
     @Override
@@ -366,7 +389,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
         if (!p && emu.stepping) emu.stepping = false;
         // play goes on: from here the live keys count, not the ones recorded before going back
         if (!p) emu.post(machine::forgetFuture);
-        view.paused = tapPaused || view.isPicking();
+        view.setPaused(tapPaused || view.isPicking());
         view.invalidate();
     }
 
@@ -604,7 +627,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
                                             + "3. Включите воспроизведение. Телефон — близко к динамику, громкость "
                                             + "70–100 %, вокруг тихо. Лучше всего — кабель с выхода магнитофона "
                                             + "на вход гарнитуры телефона.\n"
-                                            + "4. В углу экрана индикатор: полоска — уровень, зелёная точка — есть "
+                                            + "4. В панели под экраном индикатор: полоска — уровень, зелёная точка — есть "
                                             + "сигнал ленты. После загрузки монитор покажет контрольную сумму "
                                             + "и адреса; затем G и ВК — запуск (или G с адресом).\n\n"
                                             + "Если не грузится: поменяйте громкость, попробуйте «Полярность входа: "
@@ -778,12 +801,15 @@ public final class EmuActivity extends Activity implements MainView.Host {
                         + "Программы: меню → «Загрузить программу», выберите файл .rks. "
                         + "Он запустится сразу и сохранится в «Мои программы».\n\n"
                         + "Кнопки: меню → «Настроить кнопки». Для каждой программы раскладка запоминается отдельно.\n\n"
-                        + "Клавиатура: кнопка ⌨. НР (Shift) нажимается один раз и действует на следующую клавишу. "
+                        + "Клавиатура: кнопка ⌨. Буквы и цифры — в порядке настоящего «Специалиста»; ЗБ — в конце "
+                        + "ряда цифр, ВК — высокая справа, под ней ПС; АР2, ТАБ, ПВ, Р/Л и НР — слева, ↖ — справа от "
+                        + "стрелок. НР (Shift) нажимается один раз и действует на следующую клавишу. "
                         + "Р/Л переключает латиницу и кириллицу.\n\n"
                         + "Пауза: нажмите на экран «Специалиста» — посреди экрана появится маленький знак паузы, "
-                        + "а вместо названия программы (сбоку от экрана, если телефон лежит) — кнопки: на секунду и на "
-                        + "одну команду назад и вперёд. После шага 4 секунды видны последняя и следующая команды "
-                        + "процессора с регистрами. Назад можно уйти на минуту; вперёд после этого повторяется то, что "
+                        + "а вместо названия программы — кнопки: на секунду и на одну команду назад и вперёд. "
+                        + "После шага под экраном (не поверх картинки) видны последняя и следующая команды "
+                        + "процессора с регистрами — до продолжения игры. Если телефон лежит, это режим только "
+                        + "для игры: пауза есть, шагов и карты памяти нет. Назад можно уйти на минуту; вперёд после этого повторяется то, что "
                         + "было (и нажатые клавиши), пока не продолжите игру. При шагах по одной команде на карте памяти "
                         + "светится только эта команда. Пока открыто меню, эмуляция тоже стоит.\n\n"
                         + "Сохранения: у каждой программы своё. В «Моих программах» значок 💾 — "
