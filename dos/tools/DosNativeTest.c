@@ -42,6 +42,24 @@ int main(int argc, char **argv) {
     }
     const char *demo = argv[1], *dir = argv[2];
     mkdir(dir, 0755);
+    struct stat st_demo;
+    if (stat(demo, &st_demo) == 0 && S_ISDIR(st_demo.st_mode)) {
+        /* a game folder with two programs: the start menu lists them; Down + Enter starts the
+         * second one (the demo, which switches to 320x200) — keys reach the core's menu */
+        CHECK(engine_open(dir, dir, demo), "open folder %s", demo);
+        run(90);
+        CHECK(engine_width() != 320, "the start menu first, got %dx%d", engine_width(), engine_height());
+        /* the menu ignores a choice made within 0.2 s (real time) of opening: wait like a person */
+        usleep(400000);
+        engine_key(RETROK_DOWN, 1); run(3); engine_key(RETROK_DOWN, 0); run(10);
+        usleep(100000);
+        engine_key(RETROK_RETURN, 1); run(3); engine_key(RETROK_RETURN, 0);
+        run(150);
+        CHECK(engine_width() == 320 && engine_height() == 200, "menu: Down + Enter starts the demo, got %dx%d", engine_width(), engine_height());
+        printf("MENU KEYS: %s\n", failures ? "FAIL" : "OK");
+        fflush(stdout);
+        _exit(failures ? 1 : 0);
+    }
     if (!*demo) { /* no program: the start menu with an empty drive */
         CHECK(engine_open(dir, dir, ""), "open without content");
         run(60);

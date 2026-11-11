@@ -67,6 +67,9 @@ static int16_t *audio_out;
 static int audio_cap, audio_len;
 
 static uint8_t keys[RETROK_LAST];
+/* the core takes keys as events through this callback (its menu and DOS alike); keys[] is also
+ * polled, to tell which keys are still held */
+static retro_keyboard_event_t keyboard_event;
 static int pointer_x, pointer_y, pointer_pressed, pointer_count;
 static long long frames;
 
@@ -114,6 +117,9 @@ static bool environment(unsigned cmd, void *data) {
         return true;
     case RETRO_ENVIRONMENT_SET_GEOMETRY:
         av.geometry = *(const struct retro_game_geometry *)data;
+        return true;
+    case RETRO_ENVIRONMENT_SET_KEYBOARD_CALLBACK:
+        keyboard_event = ((const struct retro_keyboard_callback *)data)->callback;
         return true;
     case RETRO_ENVIRONMENT_SET_VARIABLES:
     case RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME:
@@ -299,6 +305,7 @@ int engine_open(const char *sysdir, const char *savedir, const char *content) {
     options_changed = 0;
 
     memset(keys, 0, sizeof keys);
+    keyboard_event = NULL;
     pointer_x = pointer_y = pointer_pressed = pointer_count = 0;
     pic_w = pic_h = 0;
     frames = 0;
@@ -317,7 +324,6 @@ int engine_open(const char *sysdir, const char *savedir, const char *content) {
         return 0;
     }
     retro_get_system_av_info(&av);
-    retro_set_controller_port_device(0, RETRO_DEVICE_KEYBOARD);
     is_open = 1;
     engine_history_clear();
     return 1;
@@ -367,12 +373,26 @@ int engine_picture(uint32_t *argb, int cap) {
     return n;
 }
 
+static uint16_t modifiers(void) {
+    uint16_t m = 0;
+    if (keys[RETROK_LSHIFT] || keys[RETROK_RSHIFT]) m |= RETROKMOD_SHIFT;
+    if (keys[RETROK_LCTRL] || keys[RETROK_RCTRL]) m |= RETROKMOD_CTRL;
+    if (keys[RETROK_LALT] || keys[RETROK_RALT]) m |= RETROKMOD_ALT;
+    return m;
+}
+
 void engine_key(int retrok, int down) {
-    if (retrok > 0 && retrok < RETROK_LAST) keys[retrok] = down ? 1 : 0;
+    if (retrok <= 0 || retrok >= RETROK_LAST) return;
+    down = down ? 1 : 0;
+    if (keys[retrok] == down) return;
+    keys[retrok] = (uint8_t)down;
+    uint32_t ch = (retrok >= 32 && retrok < 127) ? (uint32_t)retrok : 0;
+    if (keyboard_event) keyboard_event(down != 0, (unsigned)retrok, ch, modifiers());
 }
 
 void engine_release_keys(void) {
-    memset(keys, 0, sizeof keys);
+    for (int k = 1; k < RETROK_LAST; k++)
+        if (keys[k]) engine_key(k, 0);
     pointer_pressed = pointer_count = 0;
 }
 
