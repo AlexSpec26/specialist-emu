@@ -16,3 +16,4 @@ rootProject.name = "SpecialistEmu"
 include ':app'
 include ':zx'
 include ':atari'
+include ':dos'

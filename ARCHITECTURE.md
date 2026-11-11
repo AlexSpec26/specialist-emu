@@ -43,6 +43,7 @@ docs/       i8080-tutorial.html (DOC-001), handoffs/ (старые переда�
 | SPEC | `app/**`, общие gradle-файлы, `tools/CpuTest.java`, `tools/MachineTest.java` | `build-N` | `specialist-N.apk` |
 | ZX | `zx/**`, `tools/ZexTest.java`, `tools/Z80FuseTest.java`, `tools/ZxShot.java` | `zx-build-N` | `zx-spectrum-N.apk` |
 | ATARI | `atari/**`, общие gradle-файлы, `tools/Atari*` | `atari-build-N` | `atari-65xe-N.apk` + `atari-source-N.tar.gz` |
+| DOS | `dos/**`, общие gradle-файлы | `dos-build-N` | `dos-286-N.apk` + `dos-source-N.tar.gz` |
 | ROM | `shell/**`, `tools/Shell*.java` | `rom-build-N` | `shell-N.rom` |
 | FLIP | только вручную (workflow_dispatch) | `flipper-N` | `.fap` |
 
@@ -106,3 +107,23 @@ docs/       i8080-tutorial.html (DOC-001), handoffs/ (старые переда�
   (мост и AtariMachine).
 - Лицензия модуля — GPL-2.0-or-later; в каждый релиз кладётся архив исходников
   (`atari/tools/package_source.py`), уведомления — `assets/licenses.txt` (`make_notices.py`).
+
+## DOS 286
+- Ядро DOSBox Pure 1.0-preview8 (libretro), зафиксировано e39497e, исходники целиком и без правок
+  в `dos/src/main/jni/vendor/dosbox-pure` (`dos/THIRD_PARTY.md`). NDK 27.2 собирает
+  `libdos_engine.so` (C++ ядра + наш C) для arm64-v8a и x86_64 (страницы 16 КБ).
+- `native/engine.c` — libretro-фронтенд: опции ядра таблицей (по умолчанию cycles 2750 = 286 на
+  12,5 МГц, память 16 МБ, мышь «тачпад», меню запуска для zip), картинка XRGB8888 → ARGB до
+  1280×1024, звук стерео 48 кГц, клавиатура кодами RETROK, мышь через POINTER.
+- Перемотка (ADR-025): кольцо снимков ядра каждые ¼ с, 28 штук (~7 с, не больше 160 МБ);
+  «назад на N с» = самый новый снимок не позже N с назад, более новые отбрасываются. Без журнала
+  ввода и без повтора — точность до ¼ с, DOSBox не обязан повторяться покадрово.
+- Ядро запускается один раз на процесс (повторный старт падает внутри DOSBox), поэтому игра —
+  отдельный процесс `:game` (`GameActivity`), список игр — `LibraryActivity` в основном процессе;
+  выход из игры завершает её процесс, «начать заново» перезапускает его через список.
+- Java: `EmuThread` (кадр за кадром, темп задаёт блокирующая запись звука; замедление = кадр на
+  N кадров времени со звуком, растянутым в N раз), `GameView` (картинка, кнопки, джойстик,
+  клавиатура ПК 6×15), `PcKeys`, `NativeDos` (JNI). Сохранения — `files/states/<игра>.quick|.auto`,
+  собственные сохранения игр ядро пишет в `files/saves`.
+- Тест на ПК: `dos/tools/DosNativeTest.c` (загрузка, клавиша, перемотка 1/5 с с повтором кадров,
+  снимки, меню без игры) — `make -f dos/src/main/jni/Makefile.host test`, в CI перед сборкой.

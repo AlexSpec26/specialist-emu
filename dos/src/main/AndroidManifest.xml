@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+
+    <application
+        android:allowBackup="false"
+        android:appCategory="game"
+        android:icon="@drawable/dos_icon"
+        android:label="DOS 286"
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+
+        <!-- the list of games -->
+        <activity
+            android:name=".LibraryActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- one game: in a process of its own, because the DOSBox core starts only once per process -->
+        <activity
+            android:name=".GameActivity"
+            android:process=":game"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:exported="false"
+            android:resizeableActivity="true"
+            android:screenOrientation="fullUser" />
+    </application>
+</manifest>
