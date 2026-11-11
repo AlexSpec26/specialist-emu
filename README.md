@@ -1,6 +1,6 @@
 # Ретро-мастерская AlexSpec26
 
-Пять продуктов в одном репозитории (подробно — `VISION.md`, устройство — `ARCHITECTURE.md`,
+Шесть продуктов в одном репозитории (подробно — `VISION.md`, устройство — `ARCHITECTURE.md`,
 задачи — `BACKLOG.md`, решения — `DECISIONS.md`, текущее состояние — `HANDOFF.md`;
 правила для AI-агентов — `AGENTS.md`).
 
@@ -9,6 +9,7 @@
 | Эмулятор «Специалиста» для Android | `app/` | Releases, тег `build-N` |
 | Эмулятор ZX Spectrum 48K для Android | `zx/` | Releases, тег `zx-build-N` |
 | Эмулятор Atari 65XE для Android (см. `atari/README.md`) | `atari/` | Releases, тег `atari-build-N` |
+| DOS 286: старые игры для ПК (см. `dos/README.md`) | `dos/` | Releases, тег `dos-build-N` |
 | Оболочка в ПЗУ «Специалиста» | `shell/` | Releases, тег `rom-build-N` |
 | «Специалист» для Flipper Zero (заморожен) | `flipper/` | Releases, тег `flipper-N` |
 

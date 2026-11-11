@@ -1,0 +1,27 @@
+# Desktop build of the DOS engine with the DOSBox Pure core, for tests (CI: .github/workflows/dos.yml).
+#   make -f dos/src/main/jni/Makefile.host test            boot, keys, rewind, states, reopen
+# EXTRA_CFLAGS adds flags to every file (e.g. sanitizers). Objects go to $(OUT).
+JNI := dos/src/main/jni
+VENDOR := $(JNI)/vendor/dosbox-pure
+OUT ?= /tmp/dos-host-build
+DEMO ?= dos/tools/DEMO.COM
+
+CORE_SRC := $(wildcard $(VENDOR)/*.cpp $(VENDOR)/src/*.cpp $(VENDOR)/src/*/*.cpp $(VENDOR)/src/*/*/*.cpp)
+CORE_OBJ := $(patsubst $(VENDOR)/%.cpp,$(OUT)/core/%.o,$(CORE_SRC))
+CXXFLAGS := -O2 -std=gnu++11 -fexceptions -pthread -D__LIBRETRO__ -D_FILE_OFFSET_BITS=64 -fpic \
+            -I$(VENDOR)/include -Wno-address-of-packed-member -Wno-format -Wno-switch -Wno-psabi -w
+CFLAGS := -O1 -g -std=gnu99 -Wall -I$(JNI)/native -I$(VENDOR)/libretro-common/include
+
+.PHONY: test
+test: $(OUT)/dos-test
+	$(OUT)/dos-test $(DEMO) $(OUT)/work
+	$(OUT)/dos-test "" $(OUT)/menu
+
+$(OUT)/core/%.o: $(VENDOR)/%.cpp
+	@mkdir -p $(dir $@)
+	@$(CXX) $(CXXFLAGS) $(EXTRA_CFLAGS) -c $< -o $@
+
+$(OUT)/dos-test: $(CORE_OBJ) $(JNI)/native/engine.c $(JNI)/native/engine.h dos/tools/DosNativeTest.c
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -c $(JNI)/native/engine.c -o $(OUT)/engine.o
+	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) -c dos/tools/DosNativeTest.c -o $(OUT)/test.o
+	$(CXX) $(EXTRA_CFLAGS) -pthread -o $@ $(OUT)/engine.o $(OUT)/test.o $(CORE_OBJ)
