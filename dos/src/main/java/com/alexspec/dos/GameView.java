@@ -270,8 +270,8 @@ final class GameView extends View {
             padR = Math.min(side * 0.42f, h * 0.22f);
             padCx = ox + side / 2;
             padCy = oy + h - padR - 20 * dp;
-            float top = buttons.isEmpty() ? oy : buttons.get(buttons.size() - 1).r.bottom + 10 * dp;
-            place(new RectF(screen.right + 6 * dp, top, ox + w - 6 * dp, oy + h - 8 * dp));
+            float below = buttons.isEmpty() ? oy : buttons.get(buttons.size() - 1).r.bottom + 10 * dp;
+            place(new RectF(screen.right + 6 * dp, below, ox + w - 6 * dp, oy + h - 8 * dp));
         }
     }
 
