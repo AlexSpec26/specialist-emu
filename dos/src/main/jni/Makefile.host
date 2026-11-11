@@ -16,6 +16,8 @@ CFLAGS := -O1 -g -std=gnu99 -Wall -I$(JNI)/native -I$(VENDOR)/libretro-common/in
 test: $(OUT)/dos-test
 	$(OUT)/dos-test $(DEMO) $(OUT)/work
 	$(OUT)/dos-test "" $(OUT)/menu
+	rm -rf $(OUT)/folder && mkdir -p $(OUT)/folder && printf '\264\000\315\026\303' > $(OUT)/folder/AWAIT.COM && cp $(DEMO) $(OUT)/folder/DEMO.COM
+	$(OUT)/dos-test $(OUT)/folder $(OUT)/folderwork
 
 $(OUT)/core/%.o: $(VENDOR)/%.cpp
 	@mkdir -p $(dir $@)
