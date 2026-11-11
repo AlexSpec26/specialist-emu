@@ -65,6 +65,49 @@ final class PcKeys {
                     k("End", END, 1.25f), k("←", LEFT), k("↓", DOWN), k("→", RIGHT), k("PgDn", PAGEDOWN, 1)),
     };
 
+    static final int KP2 = 258, KP4 = 260, KP6 = 262, KP8 = 264;
+
+    /** the game pad by default: Space, Ctrl, Alt, Enter, Esc */
+    static final int[] DEFAULT_PAD = {SPACE, LCTRL, LALT, ENTER, ESC};
+    static final int DPAD_ARROWS = 0, DPAD_WASD = 1, DPAD_NUMPAD = 2;
+    /** the cross: up, down, left, right */
+    static final int[][] DPAD = {{UP, DOWN, LEFT, RIGHT}, {'w', 's', 'a', 'd'}, {KP8, KP2, KP4, KP6}};
+    static final String[] DPAD_NAMES = {"Стрелки", "W A S D", "Цифровой блок 8 2 4 6"};
+
+    /** keys to put on the game pad's buttons, the usual game keys first */
+    static int[] padChoices() {
+        java.util.LinkedHashSet<Integer> l = new java.util.LinkedHashSet<>();
+        int[] first = {SPACE, ENTER, LCTRL, LALT, LSHIFT, RCTRL, RALT, RSHIFT, ESC, TAB, BACKSPACE, UP, DOWN, LEFT, RIGHT};
+        for (int c : first) l.add(c);
+        for (int c = 'a'; c <= 'z'; c++) l.add(c);
+        for (int c = '0'; c <= '9'; c++) l.add(c);
+        for (int i = 0; i < 10; i++) l.add(F1 + i);
+        for (Key[] row : ROWS) for (Key k : row) l.add(k.code);
+        for (int c = 256; c <= 265; c++) l.add(c);
+        int[] r = new int[l.size()];
+        int i = 0;
+        for (int c : l) r[i++] = c;
+        return r;
+    }
+
+    /** a short name of the key, for buttons and lists */
+    static String label(int code) {
+        switch (code) {
+            case LSHIFT: return "Shift";
+            case RSHIFT: return "Shift пр.";
+            case LCTRL: return "Ctrl";
+            case RCTRL: return "Ctrl пр.";
+            case LALT: return "Alt";
+            case RALT: return "Alt пр.";
+            case SPACE: return "Пробел";
+            default: break;
+        }
+        if (code >= 256 && code <= 265) return "Num " + (code - 256);
+        for (Key[] row : ROWS) for (Key k : row) if (k.code == code) return k.label;
+        if (code > 32 && code < 127) return String.valueOf((char) Character.toUpperCase(code));
+        return "?";
+    }
+
     static boolean isModifier(int code) {
         return code == LSHIFT || code == RSHIFT || code == LCTRL || code == RCTRL || code == LALT || code == RALT;
     }

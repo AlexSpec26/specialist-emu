@@ -76,6 +76,8 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
         view = new GameView(this, this);
         view.title = name;
         view.controlsMode = prefs.getInt("controls:" + name, GameView.CONTROLS_PAD);
+        view.padKeys = loadPad();
+        view.dpadMode = Math.max(0, Math.min(PcKeys.DPAD.length - 1, prefs.getInt("dpad:" + name, PcKeys.DPAD_ARROWS)));
         setContentView(view);
         hideSystemBars();
 
@@ -144,6 +146,8 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
         acts.add(this::chooseSpeed);
         items.add("🖥  Процессор: " + cpuName(prefs.getString("cpu:" + name, DEFAULT_CPU)) + "…");
         acts.add(this::chooseCpu);
+        items.add("🎮  Кнопки джойстика…");
+        acts.add(this::configurePad);
         items.add(view.controlsMode == GameView.CONTROLS_PAD ? "⌨  Управление: джойстик → клавиатура" : "🎮  Управление: клавиатура → джойстик");
         acts.add(this::onControlsToggle);
         items.add(emu.sound ? "🔇  Выключить звук" : "🔊  Включить звук");
@@ -355,6 +359,135 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
         emu.post(() -> NativeDos.pointer(x, y, pressed, count));
     }
 
+    // ------------------------------------------------------------------ game pad set-up
+
+    private int[] loadPad() {
+        String v = prefs.getString("pad:" + name, null);
+        if (v == null) return PcKeys.DEFAULT_PAD.clone();
+        List<Integer> l = new ArrayList<>();
+        for (String x : v.split(",")) {
+            try {
+                int c = Integer.parseInt(x.trim());
+                if (c > 0 && c < 512 && l.size() < GameView.MAX_PAD_BUTTONS) l.add(c);
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        if (l.isEmpty()) return PcKeys.DEFAULT_PAD.clone();
+        int[] r = new int[l.size()];
+        for (int i = 0; i < r.length; i++) r[i] = l.get(i);
+        return r;
+    }
+
+    private void savePad(int[] keys, int dpad) {
+        StringBuilder b = new StringBuilder();
+        for (int k : keys) b.append(b.length() > 0 ? "," : "").append(k);
+        prefs.edit().putString("pad:" + name, b.toString()).putInt("dpad:" + name, dpad).apply();
+        view.releaseAll();
+        view.padKeys = keys;
+        view.dpadMode = dpad;
+        view.relayout();
+    }
+
+    /** the cross (arrows / WASD / numpad), how many buttons and which key each one presses */
+    private void configurePad() {
+        final List<Integer> keys = new ArrayList<>();
+        for (int k : view.padKeys) keys.add(k);
+        final int[] dpad = {view.dpadMode};
+        float dp = getResources().getDisplayMetrics().density;
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int pad = (int) (20 * dp);
+        box.setPadding(pad, (int) (8 * dp), pad, 0);
+        scroll.addView(box);
+        Runnable[] rebuild = new Runnable[1];
+        rebuild[0] = () -> {
+            box.removeAllViews();
+            android.widget.TextView t1 = new android.widget.TextView(this);
+            t1.setText("Крестовина нажимает:");
+            box.addView(t1);
+            android.widget.Button cross = new android.widget.Button(this);
+            cross.setText(PcKeys.DPAD_NAMES[dpad[0]]);
+            cross.setOnClickListener(v -> new AlertDialog.Builder(this)
+                    .setTitle("Крестовина")
+                    .setSingleChoiceItems(PcKeys.DPAD_NAMES, dpad[0], (d, w) -> {
+                        dpad[0] = w;
+                        d.dismiss();
+                        rebuild[0].run();
+                    })
+                    .show());
+            box.addView(cross);
+
+            android.widget.LinearLayout count = new android.widget.LinearLayout(this);
+            count.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+            count.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            android.widget.TextView t2 = new android.widget.TextView(this);
+            t2.setText("Кнопок: " + keys.size() + "   ");
+            android.widget.Button minus = new android.widget.Button(this), plus = new android.widget.Button(this);
+            minus.setText("−");
+            plus.setText("+");
+            minus.setEnabled(keys.size() > 1);
+            plus.setEnabled(keys.size() < GameView.MAX_PAD_BUTTONS);
+            minus.setOnClickListener(v -> {
+                keys.remove(keys.size() - 1);
+                rebuild[0].run();
+            });
+            plus.setOnClickListener(v -> {
+                int[] choices = PcKeys.padChoices();
+                int next = PcKeys.SPACE;
+                for (int c : choices) if (!keys.contains(c)) { next = c; break; }
+                keys.add(next);
+                rebuild[0].run();
+            });
+            count.addView(t2);
+            count.addView(minus);
+            count.addView(plus);
+            box.addView(count);
+
+            for (int i = 0; i < keys.size(); i++) {
+                final int idx = i;
+                android.widget.Button b = new android.widget.Button(this);
+                b.setText("Кнопка " + (i + 1) + ":  " + PcKeys.label(keys.get(i)));
+                b.setAllCaps(false);
+                b.setOnClickListener(v -> {
+                    int[] choices = PcKeys.padChoices();
+                    String[] names = new String[choices.length];
+                    int sel = -1;
+                    for (int k = 0; k < choices.length; k++) {
+                        names[k] = PcKeys.label(choices[k]);
+                        if (choices[k] == keys.get(idx)) sel = k;
+                    }
+                    new AlertDialog.Builder(this)
+                            .setTitle("Кнопка " + (idx + 1) + " нажимает")
+                            .setSingleChoiceItems(names, sel, (d, w) -> {
+                                keys.set(idx, choices[w]);
+                                d.dismiss();
+                                rebuild[0].run();
+                            })
+                            .show();
+                });
+                box.addView(b);
+            }
+            android.widget.TextView hint = new android.widget.TextView(this);
+            hint.setText("Кнопки стоят справа от крестовины по порядку: слева направо, сверху вниз. Настройка своя для каждой игры. "
+                    + "Какие клавиши нужны игре — обычно написано в её заставке или в файле README.");
+            hint.setPadding(0, (int) (8 * dp), 0, 0);
+            box.addView(hint);
+        };
+        rebuild[0].run();
+        new AlertDialog.Builder(this)
+                .setTitle("Джойстик: " + name)
+                .setView(scroll)
+                .setPositiveButton("Готово", (d, w) -> {
+                    int[] r = new int[keys.size()];
+                    for (int i = 0; i < r.length; i++) r[i] = keys.get(i);
+                    savePad(r, dpad[0]);
+                })
+                .setNeutralButton("Как было", (d, w) -> savePad(PcKeys.DEFAULT_PAD.clone(), PcKeys.DPAD_ARROWS))
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
     // ------------------------------------------------------------------ hardware keyboard
 
     @Override
@@ -466,7 +599,8 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
                 .setMessage("Экран игры — это тачпад мыши: ведите пальцем, чтобы двигать курсор, коснитесь — щелчок, "
                         + "касание двумя пальцами — правая кнопка, долгое нажатие — перетаскивание.\n\n"
                         + "Джойстик слева — стрелки, кнопки справа — Пробел, Ctrl, Alt, Enter и Esc: так управляется "
-                        + "большинство старых игр. Кнопка ⌨ переключает на полную клавиатуру ПК (несколько клавиш "
+                        + "большинство старых игр. Меню → «Кнопки джойстика»: крестовина (стрелки, WASD, цифровой блок), "
+                        + "сколько кнопок (1–8) и какую клавишу нажимает каждая — для каждой игры своё. Кнопка ⌨ переключает на полную клавиатуру ПК (несколько клавиш "
                         + "можно держать разными пальцами, например Shift и букву).\n\n"
                         + "⟲ 1 с и ⟲ 5 с — назад во времени на секунду или на пять (история — около 7 секунд, нажимать "
                         + "можно подряд). Скорость — реальная или медленнее в 2, 3, 4, 8 раз; звук при этом тянется "
