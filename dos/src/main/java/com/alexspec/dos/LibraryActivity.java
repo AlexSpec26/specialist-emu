@@ -9,6 +9,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.view.Gravity;
 import android.view.View;
@@ -36,7 +37,7 @@ import java.util.List;
  */
 public final class LibraryActivity extends Activity {
     static final String EXTRA_RELAUNCH_PATH = "relaunchPath", EXTRA_RELAUNCH_NAME = "relaunchName";
-    private static final int REQ_ADD = 1;
+    private static final int REQ_ADD = 1, REQ_ADD_FOLDER = 2;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private File games;
@@ -74,7 +75,7 @@ public final class LibraryActivity extends Activity {
         row.setOrientation(LinearLayout.HORIZONTAL);
         Button add = new Button(this);
         add.setText("＋ Добавить игру");
-        add.setOnClickListener(v -> pick());
+        add.setOnClickListener(v -> chooseAdd());
         Button bare = new Button(this);
         bare.setText("DOS без игры");
         bare.setOnClickListener(v -> launch("", "DOS"));
@@ -83,9 +84,9 @@ public final class LibraryActivity extends Activity {
         root.addView(row);
 
         empty = new TextView(this);
-        empty.setText("Игр пока нет. Нажмите «Добавить игру» и выберите файл игры: архив .zip (как скачивают "
-                + "старые и бесплатные игры), программу .exe/.com или образ диска .img/.iso. Файл копируется "
-                + "в приложение.\n\nДолгое нажатие на игру — удалить её.");
+        empty.setText("Игр пока нет. Нажмите «Добавить игру»: архив .zip (как обычно скачивают старые игры), "
+                + "папку с игрой целиком или образ диска .img/.iso. Игре нужны все её файлы, одного .exe "
+                + "обычно мало. Всё копируется в приложение.\n\nДолгое нажатие на игру — удалить её.");
         empty.setTextColor(0xFF9AA0AA);
         empty.setGravity(Gravity.START);
         empty.setPadding(0, (int) (20 * dp), 0, 0);
@@ -130,6 +131,7 @@ public final class LibraryActivity extends Activity {
 
     private static String title(File f) {
         String n = f.getName();
+        if (f.isDirectory()) return n;
         int dot = n.lastIndexOf('.');
         return dot > 0 ? n.substring(0, dot) : n;
     }
@@ -153,9 +155,30 @@ public final class LibraryActivity extends Activity {
         startActivity(i);
     }
 
+    private void chooseAdd() {
+        String[] items = {"📦  Архив .zip или образ диска (.img, .iso)", "📁  Папку с игрой целиком",
+                "📄  Файлы игры (выделите все сразу)"};
+        new AlertDialog.Builder(this)
+                .setTitle("Добавить игру")
+                .setItems(items, (d, w) -> {
+                    if (w == 1) pickFolder();
+                    else pick();
+                })
+                .show();
+    }
+
+    private void pickFolder() {
+        try {
+            startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQ_ADD_FOLDER);
+        } catch (Exception e) {
+            Toast.makeText(this, "Нет приложения для выбора папки", Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void pick() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         i.setType("*/*");
         try {
             startActivityForResult(i, REQ_ADD);
@@ -167,20 +190,105 @@ public final class LibraryActivity extends Activity {
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
-        if (req != REQ_ADD || res != RESULT_OK || data == null || data.getData() == null) return;
-        Uri uri = data.getData();
-        String name = displayName(uri);
-        if (name == null || name.isEmpty()) name = "game.zip";
-        name = GameActivity.safe(name);
-        File dst = new File(games, name);
-        String n = name;
+        if (res != RESULT_OK || data == null) return;
+        if (req == REQ_ADD_FOLDER && data.getData() != null) {
+            Uri tree = data.getData();
+            new Thread(() -> {
+                String root = DocumentsContract.getTreeDocumentId(tree);
+                String name = docName(tree, root);
+                File dst = unique(GameActivity.safe(name == null || name.isEmpty() ? "game" : name));
+                int n = copyTree(tree, root, dst, 0);
+                ui.post(() -> {
+                    refresh();
+                    Toast.makeText(this, n > 0 ? "Добавлено: " + dst.getName() + " (" + n + " файл.)"
+                            : "Папка пуста или не читается", Toast.LENGTH_SHORT).show();
+                });
+            }).start();
+            return;
+        }
+        if (req != REQ_ADD) return;
+        List<Uri> uris = new ArrayList<>();
+        if (data.getClipData() != null) {
+            for (int i = 0; i < data.getClipData().getItemCount(); i++) uris.add(data.getClipData().getItemAt(i).getUri());
+        } else if (data.getData() != null) {
+            uris.add(data.getData());
+        }
+        if (uris.isEmpty()) return;
         new Thread(() -> {
-            boolean ok = copy(uri, dst);
+            String first = displayName(uris.get(0));
+            if (first == null || first.isEmpty()) first = "game.zip";
+            first = GameActivity.safe(first);
+            String low = first.toLowerCase(java.util.Locale.ROOT);
+            boolean program = low.endsWith(".exe") || low.endsWith(".com") || low.endsWith(".bat");
+            boolean ok = true;
+            File shown;
+            if (uris.size() == 1 && !program) {
+                // an archive or a disk image: kept as one file
+                shown = new File(games, first);
+                ok = copy(uris.get(0), shown);
+            } else {
+                // several files, or a program: a folder of their own (DOSBox makes it drive C:)
+                int dot = first.lastIndexOf('.');
+                shown = unique(dot > 0 ? first.substring(0, dot) : first);
+                shown.mkdirs();
+                for (Uri u : uris) {
+                    String n = displayName(u);
+                    ok &= n != null && copy(u, new File(shown, GameActivity.safe(n)));
+                }
+            }
+            boolean done = ok, lonely = uris.size() == 1 && program;
+            File f = shown;
             ui.post(() -> {
                 refresh();
-                Toast.makeText(this, ok ? "Добавлено: " + title(dst) : "Не удалось скопировать " + n, Toast.LENGTH_SHORT).show();
+                if (!done) Toast.makeText(this, "Не удалось скопировать", Toast.LENGTH_SHORT).show();
+                else if (lonely) new AlertDialog.Builder(this)
+                        .setTitle("Добавлена одна программа")
+                        .setMessage("«" + f.getName() + "» — только запускаемый файл. Большинству игр нужны и остальные "
+                                + "их файлы (графика, звук, уровни), иначе игра скажет, что не нашла их. Лучше добавить "
+                                + "zip-архив или папку с игрой целиком; эту запись можно удалить долгим нажатием.")
+                        .setPositiveButton("Понятно", null)
+                        .show();
+                else Toast.makeText(this, "Добавлено: " + title(f), Toast.LENGTH_SHORT).show();
             });
         }).start();
+    }
+
+    /** a name in the games folder that is not taken yet */
+    private File unique(String base) {
+        File f = new File(games, base);
+        for (int i = 2; f.exists(); i++) f = new File(games, base + " (" + i + ")");
+        return f;
+    }
+
+    private String docName(Uri tree, String docId) {
+        Uri u = DocumentsContract.buildDocumentUriUsingTree(tree, docId);
+        try (Cursor c = getContentResolver().query(u, new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME}, null, null, null)) {
+            if (c != null && c.moveToFirst()) return c.getString(0);
+        } catch (RuntimeException ignored) {
+        }
+        return null;
+    }
+
+    /** copies a picked folder with its subfolders; returns the number of files */
+    private int copyTree(Uri tree, String docId, File dst, int depth) {
+        if (depth > 12) return 0;
+        dst.mkdirs();
+        int n = 0;
+        Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId);
+        String[] cols = {DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE};
+        try (Cursor c = getContentResolver().query(children, cols, null, null, null)) {
+            while (c != null && c.moveToNext()) {
+                String id = c.getString(0), name = GameActivity.safe(c.getString(1));
+                if (DocumentsContract.Document.MIME_TYPE_DIR.equals(c.getString(2))) {
+                    n += copyTree(tree, id, new File(dst, name), depth + 1);
+                } else if (copy(DocumentsContract.buildDocumentUriUsingTree(tree, id), new File(dst, name))) {
+                    n++;
+                }
+            }
+        } catch (RuntimeException ignored) {
+        }
+        return n;
     }
 
     private String displayName(Uri uri) {
@@ -205,12 +313,18 @@ public final class LibraryActivity extends Activity {
         return tmp.renameTo(dst);
     }
 
+    private static void deleteAll(File f) {
+        File[] in = f.listFiles();
+        if (in != null) for (File x : in) deleteAll(x);
+        f.delete();
+    }
+
     private void confirmDelete(File f) {
         new AlertDialog.Builder(this)
                 .setTitle(title(f))
                 .setMessage("Удалить игру из приложения? Её сохранения тоже удалятся.")
                 .setPositiveButton("Удалить", (d, w) -> {
-                    f.delete();
+                    deleteAll(f);
                     String base = GameActivity.safe(title(f));
                     new File(new File(getFilesDir(), "states"), base + ".quick").delete();
                     new File(new File(getFilesDir(), "states"), base + ".auto").delete();
