@@ -52,6 +52,8 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
     private String name;
     private File states;
     private boolean userPaused;
+    /** the game folder's name in DOS (C:\NAME), or null when the game is not a folder */
+    private String dosDir;
     private int slowIndex;
     private volatile boolean opened;
     /** the automatic save is loaded as soon as the game runs (the core loads only then) */
@@ -82,7 +84,17 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
         hideSystemBars();
 
         NativeDos.option("dosbox_pure_cycles", prefs.getString("cpu:" + name, DEFAULT_CPU));
-        emu = new EmuThread(system.getAbsolutePath(), saves.getAbsolutePath(), path, this);
+        String content = path;
+        File dir = new File(path);
+        if (!path.isEmpty() && dir.isDirectory()) {
+            // the game appears as C:\NAME, as on a hard disk of its time (GameFiles)
+            File game = GameFiles.gameDir(dir);
+            dosDir = prefs.getString("dosname:" + name, GameFiles.dosName(game.getName()));
+            File wrap = GameFiles.mountFolder(getFilesDir(), safe(name), game, dosDir);
+            content = wrap != null ? wrap.getAbsolutePath() : game.getAbsolutePath();
+            if (wrap == null) dosDir = null;
+        }
+        emu = new EmuThread(system.getAbsolutePath(), saves.getAbsolutePath(), content, this);
         emu.sound = prefs.getBoolean("sound", true);
         view.attach(emu);
         emu.start();
@@ -155,6 +167,15 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
             emu.sound = !emu.sound;
             prefs.edit().putBoolean("sound", emu.sound).apply();
         });
+        if (dosDir != null) {
+            items.add("📁  Папка в DOS: C:\\" + dosDir + "…");
+            acts.add(this::chooseDosDir);
+        }
+        File gameFile = new File(getIntent().getStringExtra(EXTRA_PATH) == null ? "" : getIntent().getStringExtra(EXTRA_PATH));
+        if (dosDir != null || gameFile.isFile()) {
+            items.add("🏛  Вернуть игру к исходному виду…");
+            acts.add(() -> restoreGame(gameFile));
+        }
         items.add("↺  Начать игру заново");
         acts.add(this::restart);
         items.add("❓  Справка");
@@ -359,6 +380,30 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
         emu.post(() -> NativeDos.pointer(x, y, pressed, count));
     }
 
+    /** the name the game's folder has in DOS: some games want exactly their own (READ1ST and the like) */
+    private void chooseDosDir() {
+        android.widget.EditText e = new android.widget.EditText(this);
+        e.setText(dosDir);
+        e.setSingleLine(true);
+        e.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(8), new android.text.InputFilter.AllCaps()});
+        float dp = getResources().getDisplayMetrics().density;
+        android.widget.FrameLayout box = new android.widget.FrameLayout(this);
+        box.setPadding((int) (20 * dp), (int) (8 * dp), (int) (20 * dp), 0);
+        box.addView(e);
+        new AlertDialog.Builder(this)
+                .setTitle("Папка игры в DOS")
+                .setMessage("Игра видна как C:\\" + dosDir + ". Если в её описании сказано ставить в папку с другим "
+                        + "именем — впишите его (до 8 букв). Файлы игры не переименовываются; игра перезапустится.")
+                .setView(box)
+                .setPositiveButton("Перезапустить", (d, w) -> {
+                    String v = GameFiles.dosName(e.getText().toString());
+                    prefs.edit().putString("dosname:" + name, v).apply();
+                    restart();
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
     // ------------------------------------------------------------------ game pad set-up
 
     private int[] loadPad() {
@@ -526,11 +571,41 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
         });
     }
 
+    /** the working copy as in the museum (everything the game wrote is lost), then a fresh start */
+    private void restoreGame(File game) {
+        if (!GameFiles.inMuseum(getFilesDir(), game)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Музейной копии нет")
+                    .setMessage("Эту игру добавили в версии без «музея». Удалите её долгим нажатием в списке и добавьте "
+                            + "заново — тогда появится нетронутая копия.")
+                    .setPositiveButton("Понятно", null)
+                    .show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Вернуть к исходному виду?")
+                .setMessage("Файлы игры станут такими, какими были при добавлении: всё, что игра записала сама "
+                        + "(её сохранения, таблицы рекордов, настройки), пропадёт. Сохранения 💾 и автосохранение "
+                        + "этой игры тоже удалятся.")
+                .setPositiveButton("Вернуть", (d, w) -> {
+                    new File(states, safe(name) + ".auto").delete();
+                    new File(states, safe(name) + ".quick").delete();
+                    restart(true);
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
     private void restart() {
+        restart(false);
+    }
+
+    private void restart(boolean restore) {
         new File(states, safe(name) + ".auto").delete();
         Intent i = new Intent(this, LibraryActivity.class);
         i.putExtra(LibraryActivity.EXTRA_RELAUNCH_PATH, getIntent().getStringExtra(EXTRA_PATH));
         i.putExtra(LibraryActivity.EXTRA_RELAUNCH_NAME, name);
+        i.putExtra(LibraryActivity.EXTRA_RESTORE, restore);
         i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         restarting = true;
         startActivity(i);
