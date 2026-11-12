@@ -302,6 +302,10 @@ int engine_open(const char *sysdir, const char *savedir, const char *content) {
     default_option("dosbox_pure_on_screen_keyboard", "false");
     default_option("dosbox_pure_audiorate", "48000");
     default_option("dosbox_pure_perfstats", "none");
+    /* no MIDI card: without a synthesizer (SoundFont / MT-32 ROM) an MPU-401 only swallows the
+     * music. Games that look for MIDI first (Retaliator: MPU-401, then AdLib, then the speaker)
+     * then pick AdLib, as on a PC with a Sound Blaster and nothing else */
+    default_option("dosbox_pure_midi", "disabled");
     options_changed = 0;
 
     memset(keys, 0, sizeof keys);

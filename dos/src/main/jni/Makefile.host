@@ -20,6 +20,8 @@ test: $(OUT)/dos-test
 	$(OUT)/dos-test $(OUT)/folder $(OUT)/folderwork
 	rm -rf $(OUT)/mount && mkdir -p $(OUT)/mount && ln -s $(abspath $(OUT)/folder) $(OUT)/mount/GAME
 	$(OUT)/dos-test $(OUT)/mount $(OUT)/mountwork
+	mkdir -p $(OUT)/mpu && printf '\272\061\003\354\074\377\165\005\270\023\000\315\020\353\376' > $(OUT)/mpu/MPU.COM
+	$(OUT)/dos-test $(OUT)/mpu/MPU.COM $(OUT)/mpuwork
 
 $(OUT)/core/%.o: $(VENDOR)/%.cpp
 	@mkdir -p $(dir $@)
