@@ -42,6 +42,15 @@ int main(int argc, char **argv) {
     }
     const char *demo = argv[1], *dir = argv[2];
     mkdir(dir, 0755);
+    if (strstr(demo, "MPU.COM")) {
+        /* MPU.COM switches to 320x200 only when nothing answers at the MIDI port 331h */
+        CHECK(engine_open(dir, dir, demo), "open %s", demo);
+        run(120);
+        CHECK(engine_width() == 320, "no MIDI card (MPU-401) without a synthesizer, got %dx%d", engine_width(), engine_height());
+        printf("NO MIDI CARD: %s\n", failures ? "FAIL" : "OK");
+        fflush(stdout);
+        _exit(failures ? 1 : 0);
+    }
     struct stat st_demo;
     if (stat(demo, &st_demo) == 0 && S_ISDIR(st_demo.st_mode)) {
         /* a game folder with two programs: the start menu lists them; Down + Enter starts the
