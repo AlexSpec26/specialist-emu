@@ -8,8 +8,9 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * Runs the DOS machine: one frame at a time, paced by the sound card (a blocking AudioTrack
- * write), or by the clock when there is no sound. Slow motion (½, ⅓, ¼, ⅛) runs a frame per 2,
- * 3, 4, 8 frame times and stretches its sound to match (it sounds lower, like a slowed tape).
+ * write), or by the clock when there is no sound. Slow motion (⅔, ½, ⅓, ¼, ⅛) runs a frame per
+ * 1.5, 2, 3, 4, 8 frame times and stretches its sound to match (it sounds lower, like a slowed
+ * tape). The engine is told the factor too: its rewind history runs on the player's clock.
  * The native machine is touched only from this thread: everything else is posted.
  */
 final class EmuThread extends Thread {
@@ -38,8 +39,10 @@ final class EmuThread extends Thread {
 
     private volatile boolean running = true;
     private volatile boolean paused;
-    /** 1 = real speed, 2, 3, 4, 8 = that many times slower */
-    volatile int slow = 1;
+    /** 1 = real speed, 1.5, 2, 3, 4, 8 = that many times slower */
+    volatile double slow = 1;
+    /** the part of an output sample the stretching still owes (for factors like 1.5) */
+    private double stretchCarry;
     volatile boolean sound = true;
 
     EmuThread(String systemDir, String saveDir, String content, Listener listener) {
@@ -157,10 +160,11 @@ final class EmuThread extends Thread {
             if (!running) break;
             if (paused) continue;
 
+            double k = Math.max(1, slow);
+            NativeDos.setSlow(k);
             int n = NativeDos.frame(audio);
             publish();
-            int k = Math.max(1, slow);
-            long frameNs = (long) (1e9 / NativeDos.fps()) * k;
+            long frameNs = (long) (1e9 / NativeDos.fps() * k);
             boolean useAudio = sound && track != null && n > 0 && k <= 8;
             if (useAudio) {
                 if (!playing) {
@@ -170,13 +174,18 @@ final class EmuThread extends Thread {
                 if (k == 1) {
                     track.write(audio, 0, n); // blocking: paces the emulation
                 } else {
-                    int m = n * k;
+                    // each input sample held k times; a fractional k (1.5) spreads the remainder
+                    // over the following frames, so the sound lasts exactly k frame times
+                    int in = n / 2;
+                    double want = in * k + stretchCarry;
+                    int out = (int) want;
+                    stretchCarry = want - out;
+                    int m = out * 2;
                     if (stretched.length < m) stretched = new short[m];
-                    for (int i = 0, o = 0; i + 1 < n; i += 2) {
-                        for (int r = 0; r < k; r++) {
-                            stretched[o++] = audio[i];
-                            stretched[o++] = audio[i + 1];
-                        }
+                    for (int j = 0; j < out; j++) {
+                        int i = Math.min(in - 1, (int) (j / k)) * 2;
+                        stretched[2 * j] = audio[i];
+                        stretched[2 * j + 1] = audio[i + 1];
                     }
                     track.write(stretched, 0, m);
                 }

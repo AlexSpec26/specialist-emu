@@ -16,7 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The game screen: the DOS picture, the buttons (menu, pause, rewind 1 s / 5 s, speed, quick
+ * The game screen: the DOS picture, the buttons (menu, pause, rewind 5 s, speed, quick
  * save / load) and the controls — a PC keyboard or a game pad (arrows + Ctrl, Alt, Space,
  * Enter). The picture works as a touch pad for the mouse: drag moves, tap clicks, two-finger
  * tap is the right button. Nothing is drawn over the picture but the pause sign.
@@ -47,7 +47,7 @@ final class GameView extends View {
 
     static final int CONTROLS_PAD = 0, CONTROLS_KEYBOARD = 1;
 
-    private static final int B_MENU = 1, B_PAUSE = 2, B_BACK1 = 3, B_BACK5 = 4, B_SPEED = 5, B_SAVE = 6,
+    private static final int B_MENU = 1, B_PAUSE = 2, B_BACK5 = 4, B_SPEED = 5, B_SAVE = 6,
             B_LOAD = 7, B_CONTROLS = 8;
     static final int MAX_PAD_BUTTONS = 8;
     /** the game pad's buttons: the PC key of each (set per game in the menu) */
@@ -199,8 +199,8 @@ final class GameView extends View {
             screen.set(ox, oy + tb, ox + w, oy + tb + sh);
             // the button row under the picture
             float rowTop = screen.bottom + gap, rowH = 44 * dp;
-            int[] ids = {B_BACK1, B_BACK5, B_SPEED, B_SAVE, B_LOAD};
-            String[] labels = {"⟲ 1 с", "⟲ 5 с", speedLabel, "💾", "📂"};
+            int[] ids = {B_BACK5, B_SPEED, B_SAVE, B_LOAD};
+            String[] labels = {"⟲ 5 с", speedLabel, "💾", "📂"};
             float bw = (w - gap * (ids.length + 1)) / ids.length;
             for (int i = 0; i < ids.length; i++) {
                 float x = ox + gap + i * (bw + gap);
@@ -215,8 +215,8 @@ final class GameView extends View {
             float side = screen.left - ox;
             float bw = Math.min(side - 2 * gap, 72 * dp), bh = 40 * dp;
             float lx = ox + gap, rx = screen.right + gap;
-            int[] leftIds = {B_MENU, B_BACK1, B_BACK5};
-            String[] leftLabels = {"☰", "⟲ 1 с", "⟲ 5 с"};
+            int[] leftIds = {B_MENU, B_BACK5};
+            String[] leftLabels = {"☰", "⟲ 5 с"};
             for (int i = 0; i < leftIds.length; i++) {
                 float y = oy + gap + i * (bh + gap);
                 button(leftIds[i], leftLabels[i]).r.set(lx, y, lx + bw, y + bh);
@@ -596,7 +596,6 @@ final class GameView extends View {
         switch (id) {
             case B_MENU: host.onMenu(); break;
             case B_PAUSE: host.onPauseToggle(); break;
-            case B_BACK1: host.onRewind(1); break;
             case B_BACK5: host.onRewind(5); break;
             case B_SPEED: host.onSpeed(); break;
             case B_SAVE: host.onQuickSave(); break;

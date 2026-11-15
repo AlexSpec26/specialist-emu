@@ -94,3 +94,4 @@ JNIEXPORT jboolean JNICALL JNI(load)(JNIEnv *env, jclass cls, jbyteArray state) 
 
 JNIEXPORT jdouble JNICALL JNI(rewind)(JNIEnv *env, jclass cls, jdouble seconds) { (void)env; (void)cls; return engine_rewind(seconds); }
 JNIEXPORT jdouble JNICALL JNI(history)(JNIEnv *env, jclass cls) { (void)env; (void)cls; return engine_history_seconds(); }
+JNIEXPORT void JNICALL JNI(setSlow)(JNIEnv *env, jclass cls, jdouble slow) { (void)env; (void)cls; engine_set_slow(slow); }

@@ -42,8 +42,8 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
     static final String[] CPU_NAMES = {"8086, 4,77 МГц (IBM PC)", "286, 6 МГц (IBM AT)", "286, 12,5 МГц",
             "386SX, 20 МГц", "386DX, 33 МГц", "486DX, 33 МГц", "486DX2, 66 МГц", "Авто (сколько потянет телефон)"};
     static final String DEFAULT_CPU = "2750";
-    private static final int[] SLOW = {1, 2, 3, 4, 8};
-    private static final String[] SLOW_LABELS = {"1×", "½", "⅓", "¼", "⅛"};
+    private static final double[] SLOW = {1, 1.5, 2, 3, 4, 8};
+    private static final String[] SLOW_LABELS = {"1×", "⅔", "½", "⅓", "¼", "⅛"};
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
@@ -222,12 +222,18 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
         slowIndex = i;
         emu.slow = SLOW[i];
         view.speedLabel = SLOW_LABELS[i];
-        view.showNote(i == 0 ? "Скорость реальная" : "Медленнее в " + SLOW[i] + " раз" + (SLOW[i] < 5 && SLOW[i] > 1 ? "а" : ""));
+        view.showNote(i == 0 ? "Скорость реальная" : "Медленнее " + times(SLOW[i]));
         view.relayout();
     }
 
+    /** "в 1,5 раза", "в 2 раза", "в 8 раз" */
+    private static String times(double k) {
+        String n = k == Math.rint(k) ? String.valueOf((int) k) : String.valueOf(k).replace('.', ',');
+        return "в " + n + (k < 5 ? " раза" : " раз");
+    }
+
     private static String speedText(int i) {
-        return i == 0 ? "реальная" : "в " + SLOW[i] + " раз" + (SLOW[i] < 5 && SLOW[i] > 1 ? "а" : "") + " медленнее";
+        return i == 0 ? "реальная" : times(SLOW[i]) + " медленнее";
     }
 
     private void chooseSpeed() {
@@ -677,10 +683,13 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
                         + "большинство старых игр. Меню → «Кнопки джойстика»: крестовина (стрелки, WASD, цифровой блок), "
                         + "сколько кнопок (1–8) и какую клавишу нажимает каждая — для каждой игры своё. Кнопка ⌨ переключает на полную клавиатуру ПК (несколько клавиш "
                         + "можно держать разными пальцами, например Shift и букву).\n\n"
-                        + "⟲ 1 с и ⟲ 5 с — назад во времени на секунду или на пять (история — около 7 секунд, нажимать "
-                        + "можно подряд). Скорость — реальная или медленнее в 2, 3, 4, 8 раз; звук при этом тянется "
-                        + "ниже.\n\n"
+                        + "⟲ 5 с — назад во времени не меньше чем на 5 секунд (точки возврата — каждые 5 секунд, "
+                        + "поэтому выходит от 5 до 10 с; нажимать можно подряд, история — минута). Секунды — ваши, "
+                        + "а не игры: при замедлении в 4 раза ⟲ 5 с вернёт на 5 секунд, которые вы прожили, то есть на "
+                        + "1¼ секунды игры. Скорость — реальная или медленнее в 1,5, 2, 3, 4, 8 раз; звук при этом "
+                        + "тянется ниже.\n\n"
                         + "💾 и 📂 — быстрое сохранение и загрузка, в меню ещё «Сохранить как…» и «Загрузить из файла». "
+                        + "Сохранение хранит и историю: после загрузки можно отмотать на минуту назад.\n\n"
                         + "При выходе положение сохраняется само, при следующем запуске предлагается продолжить.\n\n"
                         + "Если в архиве несколько программ, DOSBox покажет меню — выберите игру стрелками и Enter. "
                         + "Процессор по умолчанию — 286 на 12,5 МГц; если игре мало, выберите в меню 386 или 486.")

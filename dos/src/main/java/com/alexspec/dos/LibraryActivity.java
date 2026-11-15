@@ -67,7 +67,7 @@ public final class LibraryActivity extends Activity {
         title.setTextColor(0xFFE8E8EC);
         root.addView(title);
         TextView sub = new TextView(this);
-        sub.setText("Старые игры для ПК: перемотка на 1 и 5 секунд, замедление, сохранения в любой момент.");
+        sub.setText("Старые игры для ПК: перемотка на минуту назад, замедление, сохранения в любой момент.");
         sub.setTextColor(0xFF9AA0AA);
         sub.setPadding(0, (int) (4 * dp), 0, (int) (12 * dp));
         root.addView(sub);

@@ -196,23 +196,23 @@ static int16_t input_state(unsigned port, unsigned device, unsigned index, unsig
 
 /* ------------------------------------------------------------------ history ring */
 
-#define RING 28                         /* 7 seconds at 4 snapshots per second */
-#define RING_BYTES (160u * 1024 * 1024) /* never more than this for the whole ring */
+/* The history runs on the player's (subjective) clock: a frame counts as `slow` frame times,
+ * so in slow motion a snapshot comes every 5 seconds the player lives through, not every 5
+ * seconds of the game. A paused game does not run frames, so its time stands still. */
+#define SNAP_EVERY 5.0                  /* seconds of the player's time between snapshots */
+#define RING 13                         /* 12 steps of 5 s: a full minute back */
+#define RING_MIN 4                      /* kept even over the byte limit */
+#define RING_BYTES (160u * 1024 * 1024) /* otherwise never more than this for the whole ring */
 typedef struct {
     void *data;
     size_t size, cap;
     long long frame;
+    double subj;
 } Snap;
 static Snap ring[RING];
 static int ring_first, ring_count;
-static long long next_snap;
-static size_t state_size_cached;
-
-static int snap_every(void) {
-    double fps = engine_fps();
-    int n = (int)(fps / 4 + 0.5);
-    return n < 1 ? 1 : n;
-}
+static double subj_now, next_snap;
+static double slow_factor = 1.0;
 
 static size_t ring_bytes(void) {
     size_t t = 0;
@@ -220,25 +220,27 @@ static size_t ring_bytes(void) {
     return t;
 }
 
-static int take_snapshot(void) {
-    size_t size = retro_serialize_size();
-    if (!size) return 0;
-    if (ring_count == RING) { /* drop the oldest */
+static Snap *ring_at(int i) { return &ring[(ring_first + i) % RING]; }
+
+/* a free slot at the newest end of the ring, holding at least size bytes (drops the oldest
+ * when full) */
+static Snap *ring_push(size_t size) {
+    if (ring_count == RING) {
         ring_first = (ring_first + 1) % RING;
         ring_count--;
     }
-    Snap *s = &ring[(ring_first + ring_count) % RING];
+    Snap *s = ring_at(ring_count);
     if (s->cap < size) {
         void *p = realloc(s->data, size);
-        if (!p) return 0;
+        if (!p) return NULL;
         s->data = p;
         s->cap = size;
     }
-    if (!retro_serialize(s->data, size)) return 0;
-    s->size = size;
-    s->frame = frames;
-    ring_count++;
-    while (ring_count > 2 && ring_bytes() > RING_BYTES) {
+    return s;
+}
+
+static void ring_trim(void) {
+    while (ring_count > RING_MIN && ring_bytes() > RING_BYTES) {
         Snap *o = &ring[ring_first];
         free(o->data);
         o->data = NULL;
@@ -246,40 +248,171 @@ static int take_snapshot(void) {
         ring_first = (ring_first + 1) % RING;
         ring_count--;
     }
+}
+
+static int take_snapshot(void) {
+    size_t size = retro_serialize_size();
+    if (!size) return 0;
+    Snap *s = ring_push(size);
+    if (!s || !retro_serialize(s->data, size)) return 0;
+    s->size = size;
+    s->frame = frames;
+    s->subj = subj_now;
+    ring_count++;
+    ring_trim();
     return 1;
 }
 
+void engine_set_slow(double slow) { slow_factor = slow > 0 ? slow : 1.0; }
+
+double engine_time(void) { return subj_now; }
+
 void engine_history_clear(void) {
     ring_first = ring_count = 0;
-    next_snap = frames;
+    next_snap = subj_now;
 }
 
 double engine_history_seconds(void) {
     if (!ring_count) return 0;
-    return (frames - ring[ring_first].frame) / engine_fps();
+    return subj_now - ring[ring_first].subj;
 }
+
+int engine_history_count(void) { return ring_count; }
 
 double engine_rewind(double seconds) {
     if (!is_open || !ring_count) return 0;
-    long long target = frames - (long long)(seconds * engine_fps() + 0.5);
+    double target = subj_now - seconds + 1e-6;
     int pick = -1;
     for (int i = ring_count - 1; i >= 0; i--) {
-        Snap *s = &ring[(ring_first + i) % RING];
-        if (s->frame <= target) {
+        if (ring_at(i)->subj <= target) {
             pick = i;
             break;
         }
     }
     if (pick < 0) pick = 0; /* not that far: the oldest one */
-    Snap *s = &ring[(ring_first + pick) % RING];
-    if (s->frame >= frames) return 0;
+    Snap *s = ring_at(pick);
+    if (s->subj >= subj_now - 1e-6) return 0;
     if (!retro_unserialize(s->data, s->size)) return 0;
-    double went = (frames - s->frame) / engine_fps();
+    double went = subj_now - s->subj;
     frames = s->frame;
+    subj_now = s->subj;
     ring_count = pick + 1; /* the future is gone; the restored point stays as the newest */
-    next_snap = frames + snap_every();
+    next_snap = subj_now + SNAP_EVERY;
     engine_release_keys();
     return went;
+}
+
+/* ------------------------------------------------------------------ saved states */
+
+/* A saved state holds the whole history, so that after loading one can still go back up to a
+ * minute. Layout (little-endian, as on every phone and PC we build for):
+ *   "DOSHIST1", u32 count, u32 0, f64 time, i64 frame, f64 next snapshot time, u64 size, state,
+ *   then count × (f64 time, i64 frame, u64 size, state), oldest first.
+ * A bare core state (the format before 2026-11-15) still loads, without history. */
+static const char HIST_MAGIC[8] = {'D', 'O', 'S', 'H', 'I', 'S', 'T', '1'};
+#define HEAD_BYTES (8 + 4 + 4 + 8 + 8 + 8 + 8)
+#define SNAP_HEAD_BYTES (8 + 8 + 8)
+
+static void put(uint8_t **p, const void *v, size_t n) { memcpy(*p, v, n); *p += n; }
+static int get(const uint8_t **p, const uint8_t *end, void *v, size_t n) {
+    if ((size_t)(end - *p) < n) return 0;
+    memcpy(v, *p, n);
+    *p += n;
+    return 1;
+}
+
+size_t engine_state_size(void) {
+    if (!is_open) return 0;
+    size_t cur = retro_serialize_size();
+    if (!cur) return 0;
+    size_t t = HEAD_BYTES + cur;
+    for (int i = 0; i < ring_count; i++) t += SNAP_HEAD_BYTES + ring_at(i)->size;
+    return t;
+}
+
+int engine_save(void *data, size_t size) {
+    if (!is_open || size < engine_state_size()) return 0;
+    size_t cur = retro_serialize_size();
+    uint8_t *p = data;
+    uint32_t count = (uint32_t)ring_count, zero = 0;
+    uint64_t cur64 = cur;
+    put(&p, HIST_MAGIC, 8);
+    put(&p, &count, 4);
+    put(&p, &zero, 4);
+    put(&p, &subj_now, 8);
+    put(&p, &frames, 8);
+    put(&p, &next_snap, 8);
+    put(&p, &cur64, 8);
+    if (!retro_serialize(p, cur)) return 0;
+    p += cur;
+    for (int i = 0; i < ring_count; i++) {
+        Snap *s = ring_at(i);
+        uint64_t sz = s->size;
+        put(&p, &s->subj, 8);
+        put(&p, &s->frame, 8);
+        put(&p, &sz, 8);
+        put(&p, s->data, s->size);
+    }
+    return 1;
+}
+
+static int load_with_history(const uint8_t *p, const uint8_t *end) {
+    uint32_t count, zero;
+    double t, next;
+    long long fr;
+    uint64_t cur;
+    p += 8;
+    if (!get(&p, end, &count, 4) || !get(&p, end, &zero, 4) || !get(&p, end, &t, 8) || !get(&p, end, &fr, 8)
+        || !get(&p, end, &next, 8) || !get(&p, end, &cur, 8) || cur == 0 || cur > (uint64_t)(end - p))
+        return 0;
+    const uint8_t *state = p;
+    p += cur;
+    /* check the whole history before touching the machine */
+    const uint8_t *q = p;
+    for (uint32_t i = 0; i < count; i++) {
+        double st;
+        long long sf;
+        uint64_t sz;
+        if (!get(&q, end, &st, 8) || !get(&q, end, &sf, 8) || !get(&q, end, &sz, 8) || sz > (uint64_t)(end - q)) return 0;
+        q += sz;
+    }
+    if (!retro_unserialize(state, (size_t)cur)) return 0;
+    frames = fr;
+    subj_now = t;
+    engine_history_clear();
+    next_snap = next;
+    for (uint32_t i = 0; i < count; i++) {
+        double st;
+        long long sf;
+        uint64_t sz;
+        get(&p, end, &st, 8);
+        get(&p, end, &sf, 8);
+        get(&p, end, &sz, 8);
+        Snap *s = ring_push((size_t)sz);
+        if (s && sz && st < t + 1e-6) {
+            memcpy(s->data, p, (size_t)sz);
+            s->size = (size_t)sz;
+            s->frame = sf;
+            s->subj = st;
+            ring_count++;
+        }
+        p += sz;
+    }
+    ring_trim();
+    return 1;
+}
+
+int engine_load(const void *data, size_t size) {
+    if (!is_open) return 0;
+    const uint8_t *p = data;
+    if (size > HEAD_BYTES && !memcmp(p, HIST_MAGIC, 8)) {
+        if (!load_with_history(p, p + size)) return 0;
+    } else {
+        if (!retro_unserialize(data, size)) return 0;
+        engine_history_clear();
+    }
+    engine_release_keys();
+    return 1;
 }
 
 /* ------------------------------------------------------------------ machine */
@@ -313,7 +446,7 @@ int engine_open(const char *sysdir, const char *savedir, const char *content) {
     pointer_x = pointer_y = pointer_pressed = pointer_count = 0;
     pic_w = pic_h = 0;
     frames = 0;
-    state_size_cached = 0;
+    subj_now = 0;
 
     retro_set_environment(environment);
     retro_set_video_refresh(video);
@@ -345,10 +478,10 @@ int engine_is_open(void) { return is_open; }
 
 int engine_frame(int16_t *audio, int cap) {
     if (!is_open) return 0;
-    if (frames >= next_snap) {
+    if (subj_now >= next_snap - 1e-9) {
         /* no snapshot in the start menu (the core refuses while no program runs): try again
          * in two seconds */
-        next_snap = frames + (take_snapshot() ? snap_every() : (long long)(2 * engine_fps()));
+        next_snap = subj_now + (take_snapshot() ? SNAP_EVERY : 2.0);
     }
     audio_out = audio;
     audio_cap = cap;
@@ -356,6 +489,7 @@ int engine_frame(int16_t *audio, int cap) {
     retro_run();
     audio_out = NULL;
     frames++;
+    subj_now += slow_factor / engine_fps();
     return audio_len;
 }
 
@@ -405,20 +539,4 @@ void engine_pointer(int x, int y, int pressed, int count) {
     pointer_y = y;
     pointer_pressed = pressed;
     pointer_count = count;
-}
-
-size_t engine_state_size(void) {
-    if (!is_open) return 0;
-    return retro_serialize_size();
-}
-
-int engine_save(void *data, size_t size) {
-    return is_open && retro_serialize(data, size);
-}
-
-int engine_load(const void *data, size_t size) {
-    if (!is_open || !retro_unserialize(data, size)) return 0;
-    engine_release_keys();
-    engine_history_clear();
-    return 1;
 }
