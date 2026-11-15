@@ -45,15 +45,21 @@ void engine_key(int retrok, int down);
 void engine_release_keys(void);
 void engine_pointer(int x, int y, int pressed, int count);
 
-/* Saved state of the whole machine. Loading drops the history. */
+/* Saved state of the whole machine together with its history (a minute back is still there
+ * after loading). Bare core states from older versions load too, without history. */
 size_t engine_state_size(void);
 int engine_save(void *data, size_t size);
 int engine_load(const void *data, size_t size);
 
-/* History for rewinding: a snapshot every quarter of a second, about 6 seconds kept.
- * engine_rewind goes back at least `seconds` (or to the oldest snapshot) and returns how far
- * it actually went, 0 if there is nothing to go back to. */
+/* History for rewinding, on the player's clock: each frame counts as `slow` frame times
+ * (engine_set_slow: 1 = real speed, 1.5, 2… = that many times slower), so in slow motion
+ * "5 seconds back" means 5 seconds the player lived through. A snapshot every 5 such seconds,
+ * 13 kept (a minute back). engine_rewind goes back at least `seconds` (or to the oldest
+ * snapshot) and returns how far it actually went, 0 if there is nothing to go back to. */
+void engine_set_slow(double slow);
+double engine_time(void);
 double engine_history_seconds(void);
+int engine_history_count(void);
 double engine_rewind(double seconds);
 void engine_history_clear(void);
 #endif

@@ -48,5 +48,9 @@ final class NativeDos {
     /** back at least {@code seconds}; returns how far it went, 0 if there is no history */
     static native double rewind(double seconds);
 
+    /** seconds of history on the player's clock */
     static native double history();
+
+    /** how many times slower than real the game runs now (1, 1.5, 2…): the history clock */
+    static native void setSlow(double slow);
 }

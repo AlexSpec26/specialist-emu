@@ -25,7 +25,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Native engine test (boot, keys, rewind 1 s / 5 s, saved states, start menu)
+      - name: Native engine test (boot, keys, rewind 5 s on the player clock, minute of history, saved states, start menu)
         run: make -s -j4 -f dos/src/main/jni/Makefile.host test
       - name: Compile development APK
         run: gradle --no-daemon :dos:assembleDebug
