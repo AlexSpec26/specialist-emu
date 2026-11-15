@@ -54,6 +54,18 @@ int main(int argc, char **argv) {
         _exit(failures ? 1 : 0);
     }
     struct stat st_demo;
+    char autoboot[1024];
+    snprintf(autoboot, sizeof autoboot, "%s/AUTOBOOT.DBP", demo);
+    if (stat(demo, &st_demo) == 0 && S_ISDIR(st_demo.st_mode) && access(autoboot, F_OK) == 0) {
+        /* the app's choice of program (LaunchChoice): AUTOBOOT.DBP in the root of C: starts it at
+         * once — no start menu, no keys */
+        CHECK(engine_open(dir, dir, demo), "open folder %s", demo);
+        run(150);
+        CHECK(engine_width() == 320 && engine_height() == 200, "AUTOBOOT.DBP starts the program, got %dx%d", engine_width(), engine_height());
+        printf("AUTOBOOT: %s\n", failures ? "FAIL" : "OK");
+        fflush(stdout);
+        _exit(failures ? 1 : 0);
+    }
     if (stat(demo, &st_demo) == 0 && S_ISDIR(st_demo.st_mode)) {
         /* a game folder with two programs: the start menu lists them; Down + Enter starts the
          * second one (the demo, which switches to 320x200) — keys reach the core's menu */

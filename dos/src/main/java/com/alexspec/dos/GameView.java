@@ -18,7 +18,7 @@ import java.util.List;
 /**
  * The game screen: the DOS picture, the buttons (menu, pause, rewind 5 s, speed, quick
  * save / load) and the controls — a PC keyboard or a game pad (arrows + Ctrl, Alt, Space,
- * Enter). The picture works as a touch pad for the mouse: drag moves, tap clicks, two-finger
+ * Enter) with a floating stick: it appears where the finger comes down. The picture works as a touch pad for the mouse: drag moves, tap clicks, two-finger
  * tap is the right button. Nothing is drawn over the picture but the pause sign.
  *
  * Portrait: toolbar, picture, button row, controls. Landscape: the picture as high as the
@@ -71,7 +71,15 @@ final class GameView extends View {
     private final List<Btn> buttons = new ArrayList<>();
     private final List<KeyCap> keys = new ArrayList<>();
     private final RectF[] padButtons = new RectF[MAX_PAD_BUTTONS];
+    /** where each button answers a touch: its cell, a little larger than the circle */
+    private final RectF[] padCells = new RectF[MAX_PAD_BUTTONS];
+    /** the stick: anywhere in padZone a touch sets its centre (as in Dysmantle); padCx/padCy is
+     * where it is drawn at rest, padR its radius */
+    private final RectF padZone = new RectF();
     private float padCx, padCy, padR;
+    private boolean stickOn;
+    private int stickFinger = -1;
+    private float stickCx, stickCy, stickX, stickY;
     private boolean landscape;
     private float insL, insT, insR, insB;
 
@@ -116,7 +124,10 @@ final class GameView extends View {
         this.host = host;
         dp = c.getResources().getDisplayMetrics().density;
         text.setTextAlign(Paint.Align.CENTER);
-        for (int i = 0; i < padButtons.length; i++) padButtons[i] = new RectF();
+        for (int i = 0; i < padButtons.length; i++) {
+            padButtons[i] = new RectF();
+            padCells[i] = new RectF();
+        }
         for (PcKeys.Key[] row : PcKeys.ROWS) for (PcKeys.Key k : row) keys.add(new KeyCap(k));
         setFocusable(true);
         setFocusableInTouchMode(true);
@@ -258,43 +269,67 @@ final class GameView extends View {
                 x += k.w * unit;
             }
         }
-        // game pad: cross on the left, buttons on the right
+        // game pad: the stick's zone on the left, buttons on the right
+        float gap = 8 * dp;
+        float quarter = (w + insL + insR) / 4f; // one button: a quarter of the screen wide
         if (!landscape) {
-            float area = Math.min(controls.height(), w / 2);
-            padR = area * 0.42f;
-            padCx = controls.left + 16 * dp + padR;
-            padCy = controls.centerY();
-            place(new RectF(controls.left + w / 2, controls.top + 8 * dp, controls.right - 12 * dp, controls.bottom - 8 * dp));
+            padZone.set(controls.left, controls.top, controls.centerX(), controls.bottom);
+            padR = Math.min(padZone.width(), padZone.height()) * 0.3f;
+            padCx = padZone.centerX();
+            padCy = padZone.centerY();
+            place(new RectF(controls.centerX() + gap, controls.top + gap, controls.right - gap, controls.bottom - gap), quarter);
         } else {
             float side = screen.left - ox;
-            padR = Math.min(side * 0.42f, h * 0.22f);
-            padCx = ox + side / 2;
-            padCy = oy + h - padR - 20 * dp;
-            float below = buttons.isEmpty() ? oy : buttons.get(buttons.size() - 1).r.bottom + 10 * dp;
-            place(new RectF(screen.right + 6 * dp, below, ox + w - 6 * dp, oy + h - 8 * dp));
+            float belowLeft = oy;
+            float belowRight = oy;
+            for (Btn b : buttons) {
+                if (b.r.centerX() < screen.left) belowLeft = Math.max(belowLeft, b.r.bottom);
+                else belowRight = Math.max(belowRight, b.r.bottom);
+            }
+            padZone.set(ox, belowLeft + gap, screen.left, oy + h);
+            padR = Math.min(side * 0.4f, padZone.height() * 0.32f);
+            padCx = padZone.centerX();
+            padCy = padZone.bottom - padR - 20 * dp;
+            place(new RectF(screen.right + gap, belowRight + 2 * gap, ox + w - gap, oy + h - gap), quarter);
         }
     }
 
     /**
-     * The buttons in a grid inside the area: 1 alone, 2 side by side, 3–4 in two rows, 5–6 in
-     * three columns, 7–8 in four; the second row is shifted by half a button, as on game pads.
+     * The buttons as large as the area allows (the more of them, the smaller), but no wider than
+     * maxD; the grid with the most room per button wins, its rows filled left to right, top to
+     * bottom, and the whole grid in the middle of the area.
      */
-    private void place(RectF area) {
+    private void place(RectF area, float maxD) {
         int n = padKeys.length;
         if (n == 0) return;
-        int cols = n <= 2 ? n : n <= 4 ? 2 : n <= 6 ? 3 : 4;
-        int rows = (n + cols - 1) / cols;
-        float cw = area.width() / (cols + (rows > 1 ? 0.5f : 0)), ch = area.height() / rows;
-        float s = Math.min(Math.min(cw, ch) * 0.9f, 72 * dp);
-        float gridH = rows * Math.min(ch, s * 1.15f);
+        float g = 12 * dp;
+        int bestCols = 1;
+        float best = 0;
+        for (int cols = 1; cols <= n; cols++) {
+            int rows = (n + cols - 1) / cols;
+            float s = Math.min((area.width() - g * (cols - 1)) / cols, (area.height() - g * (rows - 1)) / rows);
+            if (s > best + 0.5f) {
+                best = s;
+                bestCols = cols;
+            }
+        }
+        int cols = bestCols, rows = (n + cols - 1) / cols;
+        float d = Math.max(16 * dp, Math.min(best, maxD));
+        // spare room goes into the gaps (up to 0.3 of a button), so the grid spreads over the area
+        float gx = cols > 1 ? Math.min((area.width() - cols * d) / (cols - 1), d * 0.3f) : 0;
+        float gy = rows > 1 ? Math.min((area.height() - rows * d) / (rows - 1), d * 0.3f) : 0;
+        gx = Math.max(gx, g * 0.5f);
+        gy = Math.max(gy, g * 0.5f);
+        float gridH = rows * d + (rows - 1) * gy;
         float y0 = area.centerY() - gridH / 2;
         for (int i = 0; i < n; i++) {
             int r = i / cols, c = i % cols;
             int inRow = Math.min(cols, n - r * cols);
-            float shift = rows > 1 && (r % 2 == 1) ? cw / 2 : 0;
-            float rowW = inRow * cw;
-            float x0 = area.right - rowW - (rows > 1 ? cw / 2 : 0) + shift;
-            set(padButtons[i], x0 + c * cw + cw / 2, y0 + r * (gridH / rows) + gridH / rows / 2, s);
+            float rowW = inRow * d + (inRow - 1) * gx;
+            float x0 = area.centerX() - rowW / 2;
+            float cx = x0 + c * (d + gx) + d / 2, cy = y0 + r * (d + gy) + d / 2;
+            set(padButtons[i], cx, cy, d);
+            padCells[i].set(cx - (d + gx) / 2, cy - (d + gy) / 2, cx + (d + gx) / 2, cy + (d + gy) / 2);
         }
     }
 
@@ -384,20 +419,32 @@ final class GameView extends View {
 
     private void drawPad(Canvas c) {
         int alpha = landscape ? 0x99 : 0xFF;
-        fill.setColor((alpha << 24) | 0x262A33);
-        c.drawCircle(padCx, padCy, padR, fill);
-        fill.setColor((alpha << 24) | 0x3A3F4B);
-        float arm = padR * 0.36f;
-        c.drawRoundRect(padCx - arm, padCy - padR * 0.9f, padCx + arm, padCy + padR * 0.9f, 6 * dp, 6 * dp, fill);
-        c.drawRoundRect(padCx - padR * 0.9f, padCy - arm, padCx + padR * 0.9f, padCy + arm, 6 * dp, 6 * dp, fill);
-        text.setColor(0xCCFFFFFF);
+        // the stick: at rest a faint ring with the keys it sends; under the finger a ring where
+        // the finger came down and a knob that leans its way
+        float cx = stickOn ? stickCx : padCx, cy = stickOn ? stickCy : padCy;
+        fill.setColor(((stickOn ? alpha : alpha / 2) << 24) | 0x262A33);
+        c.drawCircle(cx, cy, padR, fill);
+        text.setColor(stickOn ? 0xCCFFFFFF : 0x88FFFFFF);
         text.setTextSize(padR * 0.22f);
-        float o = padR * 0.65f, d = text.getTextSize() * 0.35f;
+        float o = padR * 0.72f, d = text.getTextSize() * 0.35f;
         int[] dir = PcKeys.DPAD[dpadMode];
-        c.drawText(PcKeys.label(dir[0]), padCx, padCy - o + d, text);
-        c.drawText(PcKeys.label(dir[1]), padCx, padCy + o + d, text);
-        c.drawText(PcKeys.label(dir[2]), padCx - o, padCy + d, text);
-        c.drawText(PcKeys.label(dir[3]), padCx + o, padCy + d, text);
+        c.drawText(PcKeys.label(dir[0]), cx, cy - o + d, text);
+        c.drawText(PcKeys.label(dir[1]), cx, cy + o + d, text);
+        c.drawText(PcKeys.label(dir[2]), cx - o, cy + d, text);
+        c.drawText(PcKeys.label(dir[3]), cx + o, cy + d, text);
+        float kx = cx, ky = cy;
+        if (stickOn) {
+            float dx = stickX - stickCx, dy = stickY - stickCy, len = (float) Math.hypot(dx, dy), lim = padR * 0.6f;
+            if (len > lim) {
+                dx *= lim / len;
+                dy *= lim / len;
+            }
+            kx += dx;
+            ky += dy;
+        }
+        boolean leaning = padDir[0] != 0 || padDir[1] != 0;
+        fill.setColor(leaning ? 0xFF5A7DFF : ((stickOn ? alpha : alpha / 2) << 24) | 0x3A3F4B);
+        c.drawCircle(kx, ky, padR * 0.4f, fill);
         for (int i = 0; i < padKeys.length; i++) {
             RectF r = padButtons[i];
             boolean down = held[padKeys[i]] > 0;
@@ -405,7 +452,7 @@ final class GameView extends View {
             c.drawCircle(r.centerX(), r.centerY(), r.width() / 2, fill);
             String label = PcKeys.label(padKeys[i]);
             text.setColor(Color.WHITE);
-            float ts = Math.min(r.height() * (label.length() <= 2 ? 0.4f : 0.26f), 17 * dp);
+            float ts = Math.min(r.height() * (label.length() <= 2 ? 0.4f : 0.26f), 28 * dp);
             text.setTextSize(ts);
             while (text.measureText(label) > r.width() * 0.86f && ts > 6 * dp) text.setTextSize(ts -= dp);
             c.drawText(label, r.centerX(), r.centerY() + text.getTextSize() * 0.35f, text);
@@ -449,6 +496,8 @@ final class GameView extends View {
             }
         }
         padDir[0] = padDir[1] = 0;
+        stickOn = false;
+        stickFinger = -1;
         fingers.clear();
         screenFinger = -1;
         invalidate();
@@ -461,13 +510,8 @@ final class GameView extends View {
             return T_NONE;
         }
         if (padVisible()) {
-            for (int i = 0; i < padKeys.length; i++) {
-                RectF r = new RectF(padButtons[i]);
-                r.inset(-6 * dp, -6 * dp);
-                if (r.contains(x, y)) return T_KEY + padKeys[i];
-            }
-            float dx = x - padCx, dy = y - padCy;
-            if (dx * dx + dy * dy < padR * padR * 1.3f) return T_PAD;
+            for (int i = 0; i < padKeys.length; i++) if (padCells[i].contains(x, y)) return T_KEY + padKeys[i];
+            if (padZone.contains(x, y)) return stickFinger < 0 ? T_PAD : T_NONE;
         }
         if (screen.contains(x, y)) return T_SCREEN;
         return T_NONE;
@@ -478,12 +522,22 @@ final class GameView extends View {
         return null;
     }
 
+    /** the stick follows a finger: the centre is where it came down (and is dragged along when
+     * the finger goes farther than the ring); the lean beyond a small dead zone gives 8 ways */
     private void updatePad(float x, float y, boolean release) {
         int h = 0, v = 0;
         if (!release) {
-            float dx = x - padCx, dy = y - padCy;
-            float dead = padR * 0.22f;
-            if (dx * dx + dy * dy > dead * dead) {
+            stickX = x;
+            stickY = y;
+            float dx = x - stickCx, dy = y - stickCy, len = (float) Math.hypot(dx, dy);
+            if (len > padR) {
+                stickCx = x - dx * padR / len;
+                stickCy = y - dy * padR / len;
+                dx = x - stickCx;
+                dy = y - stickCy;
+                len = padR;
+            }
+            if (len > padR * 0.25f) {
                 double a = Math.toDegrees(Math.atan2(dy, dx)); // 8 directions
                 int[] dir = PcKeys.DPAD[dpadMode];
                 if (a > -67.5 && a < 67.5) h = dir[3];
@@ -535,6 +589,10 @@ final class GameView extends View {
                     press(t - T_KEY, true);
                     invalidate();
                 } else if (t == T_PAD) {
+                    stickFinger = id;
+                    stickOn = true;
+                    stickCx = x;
+                    stickCy = y;
                     updatePad(x, y, false);
                 } else if (t == T_SCREEN) {
                     if (screenFinger < 0) screenFinger = id;
@@ -562,7 +620,11 @@ final class GameView extends View {
                     Integer t = fingers.get(id);
                     if (t == null) continue;
                     if (t >= T_KEY) press(t - T_KEY, false);
-                    else if (t == T_PAD) updatePad(0, 0, true);
+                    else if (t == T_PAD) {
+                        stickOn = false;
+                        stickFinger = -1;
+                        updatePad(0, 0, true);
+                    }
                     else if (t == T_SCREEN) {
                         if (id == screenFinger) {
                             sendPointer(ev.getX(i), ev.getY(i), screenFingers() > 1);
@@ -581,6 +643,11 @@ final class GameView extends View {
                     fingers.remove(id);
                 }
                 if (all) {
+                    if (stickOn) {
+                        stickOn = false;
+                        updatePad(0, 0, true);
+                    }
+                    stickFinger = -1;
                     fingers.clear();
                     screenFinger = -1;
                 }

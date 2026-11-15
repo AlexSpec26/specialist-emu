@@ -147,6 +147,17 @@ public final class LibraryActivity extends Activity {
         }, 600); // the old game process ends first
     }
 
+    /** the settings shared with the game process: read fresh each time (it writes them too) */
+    @SuppressWarnings("deprecation")
+    private android.content.SharedPreferences prefs() {
+        return getSharedPreferences("dos", MODE_MULTI_PROCESS);
+    }
+
+    /** right after adding: which program starts the game and which folder is its root */
+    private void askLaunch(File game) {
+        if (game.isDirectory()) LaunchChoice.ask(this, prefs(), title(game), game, () -> { });
+    }
+
     private static String title(File f) {
         String n = f.getName();
         if (f.isDirectory()) return n;
@@ -182,6 +193,15 @@ public final class LibraryActivity extends Activity {
             }).start();
             return;
         }
+        if (f.isDirectory() && !LaunchChoice.chosen(prefs(), name) && LaunchChoice.programs(f).size() > 1) {
+            // several programs and none chosen yet: which one is the game (asked once)
+            LaunchChoice.ask(this, prefs(), name, f, () -> start(path, name));
+            return;
+        }
+        start(path, name);
+    }
+
+    private void start(String path, String name) {
         Intent i = new Intent(this, GameActivity.class);
         i.putExtra(GameActivity.EXTRA_PATH, path);
         i.putExtra(GameActivity.EXTRA_NAME, name);
@@ -236,6 +256,7 @@ public final class LibraryActivity extends Activity {
                     refresh();
                     Toast.makeText(this, n > 0 ? "Добавлено: " + dst.getName() + " (" + n + " файл.)"
                             : "Папка пуста или не читается", Toast.LENGTH_SHORT).show();
+                    if (n > 0) askLaunch(dst);
                 });
             }).start();
             return;
@@ -292,7 +313,10 @@ public final class LibraryActivity extends Activity {
                                 + "zip-архив или папку с игрой целиком; эту запись можно удалить долгим нажатием.")
                         .setPositiveButton("Понятно", null)
                         .show();
-                else Toast.makeText(this, "Добавлено: " + title(f), Toast.LENGTH_SHORT).show();
+                else {
+                    Toast.makeText(this, "Добавлено: " + title(f), Toast.LENGTH_SHORT).show();
+                    askLaunch(f);
+                }
             });
         }).start();
     }
@@ -408,6 +432,8 @@ public final class LibraryActivity extends Activity {
                     String base = GameActivity.safe(title(f));
                     new File(new File(getFilesDir(), "states"), base + ".quick").delete();
                     new File(new File(getFilesDir(), "states"), base + ".auto").delete();
+                    prefs().edit().remove(LaunchChoice.KEY_EXE + title(f)).remove(LaunchChoice.KEY_ROOT + title(f))
+                            .remove("dosname:" + title(f)).commit();
                     refresh();
                 })
                 .setNegativeButton("Отмена", null)

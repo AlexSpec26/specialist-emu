@@ -88,11 +88,13 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
         File dir = new File(path);
         if (!path.isEmpty() && dir.isDirectory()) {
             // the game appears as C:\NAME, as on a hard disk of its time (GameFiles)
-            File game = GameFiles.gameDir(dir);
+            File game = LaunchChoice.root(prefs, name, dir);
             dosDir = prefs.getString("dosname:" + name, GameFiles.dosName(game.getName()));
             File wrap = GameFiles.mountFolder(getFilesDir(), safe(name), game, dosDir);
             content = wrap != null ? wrap.getAbsolutePath() : game.getAbsolutePath();
             if (wrap == null) dosDir = null;
+            // straight into the game: DOSBox starts C:\NAME\PROGRAM, not its menu
+            else LaunchChoice.writeAutoboot(wrap, dosDir, LaunchChoice.exe(prefs, name, dir));
         }
         emu = new EmuThread(system.getAbsolutePath(), saves.getAbsolutePath(), content, this);
         emu.sound = prefs.getBoolean("sound", true);
@@ -167,6 +169,12 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
             emu.sound = !emu.sound;
             prefs.edit().putBoolean("sound", emu.sound).apply();
         });
+        if (dosDir != null) {
+            File top = new File(getIntent().getStringExtra(EXTRA_PATH));
+            String exe = LaunchChoice.exe(prefs, name, top);
+            items.add("▶  Запуск: " + (exe == null || exe.isEmpty() ? "меню DOSBox" : exe.replace('/', '\\').toUpperCase(Locale.ROOT)) + "…");
+            acts.add(() -> LaunchChoice.ask(this, prefs, name, top, this::restart));
+        }
         if (dosDir != null) {
             items.add("📁  Папка в DOS: C:\\" + dosDir + "…");
             acts.add(this::chooseDosDir);
@@ -679,7 +687,8 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
                 .setTitle("Как играть")
                 .setMessage("Экран игры — это тачпад мыши: ведите пальцем, чтобы двигать курсор, коснитесь — щелчок, "
                         + "касание двумя пальцами — правая кнопка, долгое нажатие — перетаскивание.\n\n"
-                        + "Джойстик слева — стрелки, кнопки справа — Пробел, Ctrl, Alt, Enter и Esc: так управляется "
+                        + "Джойстик слева — коснитесь в любом месте левой половины: там будет его центр, а куда поведёте палец, "
+                        + "туда он и наклонится (стрелки). Кнопки справа — Пробел, Ctrl, Alt, Enter и Esc: так управляется "
                         + "большинство старых игр. Меню → «Кнопки джойстика»: крестовина (стрелки, WASD, цифровой блок), "
                         + "сколько кнопок (1–8) и какую клавишу нажимает каждая — для каждой игры своё. Кнопка ⌨ переключает на полную клавиатуру ПК (несколько клавиш "
                         + "можно держать разными пальцами, например Shift и букву).\n\n"
@@ -691,7 +700,8 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
                         + "💾 и 📂 — быстрое сохранение и загрузка, в меню ещё «Сохранить как…» и «Загрузить из файла». "
                         + "Сохранение хранит и историю: после загрузки можно отмотать на минуту назад.\n\n"
                         + "При выходе положение сохраняется само, при следующем запуске предлагается продолжить.\n\n"
-                        + "Если в архиве несколько программ, DOSBox покажет меню — выберите игру стрелками и Enter. "
+                        + "Какой программой запускать игру и какая папка — её корень (C:\\ИМЯ), спрашивается при добавлении; "
+                        + "поменять — меню → «Запуск». Если выбрать «Меню DOSBox», при каждом старте будет его список программ. "
                         + "Процессор по умолчанию — 286 на 12,5 МГц; если игре мало, выберите в меню 386 или 486.")
                 .setPositiveButton("Понятно", null)
                 .show();
