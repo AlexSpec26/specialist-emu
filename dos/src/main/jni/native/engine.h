@@ -46,7 +46,7 @@ void engine_release_keys(void);
 void engine_pointer(int x, int y, int pressed, int count);
 
 /* Saved state of the whole machine together with its history (a minute back is still there
- * after loading). Bare core states from older versions load too, without history. */
+ * after loading) and the start of its real-time clock. Older states load too. */
 size_t engine_state_size(void);
 int engine_save(void *data, size_t size);
 int engine_load(const void *data, size_t size);

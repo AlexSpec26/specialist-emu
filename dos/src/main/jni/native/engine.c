@@ -306,11 +306,19 @@ double engine_rewind(double seconds) {
 
 /* A saved state holds the whole history, so that after loading one can still go back up to a
  * minute. Layout (little-endian, as on every phone and PC we build for):
- *   "DOSHIST1", u32 count, u32 0, f64 time, i64 frame, f64 next snapshot time, u64 size, state,
- *   then count × (f64 time, i64 frame, u64 size, state), oldest first.
- * A bare core state (the format before 2026-11-15) still loads, without history. */
-static const char HIST_MAGIC[8] = {'D', 'O', 'S', 'H', 'I', 'S', 'T', '1'};
-#define HEAD_BYTES (8 + 4 + 4 + 8 + 8 + 8 + 8)
+ *   "DOSHIST2", u32 count, u32 0, f64 time, i64 frame, f64 next snapshot time,
+ *   f64 clock base, u64 size, state, then count × (f64 time, i64 frame, u64 size, state), oldest
+ *   first. The clock base: where the machine's real-time clock started (the core's clock runs on
+ *   emulated time, cmos.cpp ALEXSPEC), so a loaded game sees its clock where it was saved.
+ * "DOSHIST1" (2026-11-15, no clock base) and a bare core state (before) still load. */
+static const char HIST_MAGIC[8] = {'D', 'O', 'S', 'H', 'I', 'S', 'T', '2'};
+static const char HIST_MAGIC1[8] = {'D', 'O', 'S', 'H', 'I', 'S', 'T', '1'};
+#define HEAD_BYTES (8 + 4 + 4 + 8 + 8 + 8 + 8 + 8)
+#define HEAD1_BYTES (HEAD_BYTES - 8)
+
+/* the real-time clock's start, in the core (vendor/.../hardware/cmos.cpp) */
+double alexspec_rtc_get_base(void);
+void alexspec_rtc_set_base(double base);
 #define SNAP_HEAD_BYTES (8 + 8 + 8)
 
 static void put(uint8_t **p, const void *v, size_t n) { memcpy(*p, v, n); *p += n; }
@@ -342,6 +350,8 @@ int engine_save(void *data, size_t size) {
     put(&p, &subj_now, 8);
     put(&p, &frames, 8);
     put(&p, &next_snap, 8);
+    double base = alexspec_rtc_get_base();
+    put(&p, &base, 8);
     put(&p, &cur64, 8);
     if (!retro_serialize(p, cur)) return 0;
     p += cur;
@@ -356,14 +366,15 @@ int engine_save(void *data, size_t size) {
     return 1;
 }
 
-static int load_with_history(const uint8_t *p, const uint8_t *end) {
+static int load_with_history(const uint8_t *p, const uint8_t *end, int has_base) {
     uint32_t count, zero;
-    double t, next;
+    double t, next, base = 0;
     long long fr;
     uint64_t cur;
     p += 8;
     if (!get(&p, end, &count, 4) || !get(&p, end, &zero, 4) || !get(&p, end, &t, 8) || !get(&p, end, &fr, 8)
-        || !get(&p, end, &next, 8) || !get(&p, end, &cur, 8) || cur == 0 || cur > (uint64_t)(end - p))
+        || !get(&p, end, &next, 8) || (has_base && !get(&p, end, &base, 8)) || !get(&p, end, &cur, 8) || cur == 0
+        || cur > (uint64_t)(end - p))
         return 0;
     const uint8_t *state = p;
     p += cur;
@@ -377,6 +388,7 @@ static int load_with_history(const uint8_t *p, const uint8_t *end) {
         q += sz;
     }
     if (!retro_unserialize(state, (size_t)cur)) return 0;
+    if (has_base) alexspec_rtc_set_base(base);
     frames = fr;
     subj_now = t;
     engine_history_clear();
@@ -406,7 +418,9 @@ int engine_load(const void *data, size_t size) {
     if (!is_open) return 0;
     const uint8_t *p = data;
     if (size > HEAD_BYTES && !memcmp(p, HIST_MAGIC, 8)) {
-        if (!load_with_history(p, p + size)) return 0;
+        if (!load_with_history(p, p + size, 1)) return 0;
+    } else if (size > HEAD1_BYTES && !memcmp(p, HIST_MAGIC1, 8)) {
+        if (!load_with_history(p, p + size, 0)) return 0;
     } else {
         if (!retro_unserialize(data, size)) return 0;
         engine_history_clear();
