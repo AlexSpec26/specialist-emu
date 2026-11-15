@@ -31,6 +31,24 @@ static uint64_t picture_hash(void) {
     return h;
 }
 
+/* the core's memory, and the start of its real-time clock (cmos.cpp, ALEXSPEC) */
+extern uint8_t *MemBase;
+double alexspec_rtc_get_base(void);
+void alexspec_rtc_set_base(double base);
+
+static int bcd(uint8_t v) { return (v >> 4) * 10 + (v & 15); }
+
+/* the clock RTC.COM copied last, in seconds since the start of the day it shows */
+static long rtc_seconds(void) {
+    return bcd(MemBase[0x502]) * 3600L + bcd(MemBase[0x501]) * 60L + bcd(MemBase[0x500]);
+}
+
+/* b - a on a clock that wraps at midnight, in -12 h … +12 h */
+static long rtc_diff(long a, long b) {
+    long d = ((b - a) % 86400 + 86400) % 86400;
+    return d > 43200 ? d - 86400 : d;
+}
+
 static int run(int n) {
     int samples = 0;
     for (int i = 0; i < n; i++) samples += engine_frame(audio, (int)(sizeof audio / sizeof audio[0]));
@@ -50,6 +68,44 @@ int main(int argc, char **argv) {
         run(120);
         CHECK(engine_width() == 320, "no MIDI card (MPU-401) without a synthesizer, got %dx%d", engine_width(), engine_height());
         printf("NO MIDI CARD: %s\n", failures ? "FAIL" : "OK");
+        fflush(stdout);
+        _exit(failures ? 1 : 0);
+    }
+    if (strstr(demo, "RTC.COM")) {
+        /* the real-time clock (CMOS, ports 70h/71h) runs on emulated time: RTC.COM copies its
+         * seconds, minutes, hours to 0000:0500.. */
+        CHECK(engine_open(dir, dir, demo), "open %s", demo);
+        run(140);
+        CHECK(MemBase[0x503] == 1, "RTC.COM runs");
+        double fps = engine_fps();
+        long t0 = rtc_seconds();
+        run((int)(fps * 30)); /* 30 s of the machine, in well under 30 s here */
+        long t1 = rtc_seconds();
+        CHECK(labs(rtc_diff(t0, t1) - 30) <= 1, "30 s of emulated time: the clock went %ld s", rtc_diff(t0, t1));
+        for (int i = 0; i < (int)fps; i++) { run(1); usleep(40000); } /* 1 s of the machine in ~3 s */
+        long t2 = rtc_seconds();
+        CHECK(labs(rtc_diff(t1, t2) - 1) <= 1, "1 s of emulated time stretched to ~3 s: the clock went %ld s", rtc_diff(t1, t2));
+        /* rewinding takes the clock back too */
+        run((int)(fps * 12));
+        long t3 = rtc_seconds();
+        double went = engine_rewind(5.0);
+        run(12);
+        long t4 = rtc_seconds();
+        CHECK(went >= 5.0 && labs(rtc_diff(t4, t3) - (long)(went + 0.5)) <= 1, "rewind %.1f s: the clock went back %ld s", went, rtc_diff(t4, t3));
+        /* a saved state brings its clock back, even when the machine was started at another time */
+        size_t size = engine_state_size();
+        void *st = malloc(size);
+        CHECK(st && engine_save(st, size), "save");
+        long ts = rtc_seconds();
+        alexspec_rtc_set_base(alexspec_rtc_get_base() + 3 * 3600.0); /* as if started three hours later */
+        run(12); /* RTC.COM copies the clock on each timer tick (18 a second) */
+        CHECK(labs(rtc_diff(ts, rtc_seconds()) - 3 * 3600) <= 1, "the base moves the clock");
+        CHECK(engine_load(st, size), "load");
+        run(12);
+        long tl = rtc_seconds();
+        CHECK(labs(rtc_diff(ts, tl)) <= 1, "after loading the clock is where it was saved: %ld s off", rtc_diff(ts, tl));
+        printf("RTC ON EMULATED TIME: %s (30 s → %ld s, 1 s slowed → %ld s, rewind → -%ld s)\n", failures ? "FAIL" : "OK",
+               rtc_diff(t0, t1), rtc_diff(t1, t2), rtc_diff(t4, t3));
         fflush(stdout);
         _exit(failures ? 1 : 0);
     }
@@ -197,7 +253,7 @@ int main(int argc, char **argv) {
     run(10);
     CHECK(engine_history_count() == 1, "history grows again");
     /* a broken file loads nothing */
-    memset((char *)st + 40, 0xFF, 8);
+    memset((char *)st + 48, 0xFF, 8); /* the size of the current state */
     CHECK(!engine_load(st, size), "a damaged state is refused");
     free(bs);
     printf("STATE %zu bytes with %d snapshots: OK\n", size, count_save);

@@ -48,6 +48,31 @@ static struct {
 	bool update_ended;
 } cmos;
 
+//ALEXSPEC: the real-time clock runs on the emulator's time, not the phone's: in slow motion it
+//ALEXSPEC: runs slower, after a rewind it is back where it was. The date and time of day start
+//ALEXSPEC: from the phone's clock when the machine starts; the app keeps the start (the "base")
+//ALEXSPEC: in its saved states. Changed 2026-11-16 for the DOS 286 app, see dos/THIRD_PARTY.md.
+static double alexspec_rtc_base; /* seconds since 1970 at PIC_FullIndex() == 0 */
+static bool alexspec_rtc_has_base;
+
+static time_t alexspec_rtc_now(void) {
+	if (!alexspec_rtc_has_base) {
+		alexspec_rtc_base = (double)time(NULL) - PIC_FullIndex() / 1000.0;
+		alexspec_rtc_has_base = true;
+	}
+	return (time_t)(alexspec_rtc_base + PIC_FullIndex() / 1000.0);
+}
+
+extern "C" double alexspec_rtc_get_base(void) {
+	alexspec_rtc_now();
+	return alexspec_rtc_base;
+}
+
+extern "C" void alexspec_rtc_set_base(double base) {
+	alexspec_rtc_base = base;
+	alexspec_rtc_has_base = true;
+}
+
 static void cmos_timerevent(Bitu /*val*/) {
 	if (cmos.timer.acknowledged) {
 		cmos.timer.acknowledged = false;
@@ -133,7 +158,7 @@ static Bitu cmos_readreg(Bitu /*port*/,Bitu /*iolen*/) {
 	time_t curtime;
 	struct tm *loctime;
 	/* Get the current time. */
-	curtime = time (NULL);
+	curtime = alexspec_rtc_now(); //ALEXSPEC: was time (NULL)
 
 	/* Convert it to local time representation. */
 	loctime = localtime (&curtime);
