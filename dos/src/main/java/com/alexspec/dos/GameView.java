@@ -71,7 +71,8 @@ final class GameView extends View {
     /** draws the picture through the phone's video chip (screen modes); null or failed: drawn here */
     ScreenRenderer screenRenderer;
     Runnable requestRender;
-    /** the pause magnifier: 1…8, and the source point (0..1) in the middle */
+    /** the pause magnifier: 1…MAX_ZOOM, and the source point (0..1) in the middle */
+    static final float MAX_ZOOM = 24f;
     private float zoom = 1, zoomCx = 0.5f, zoomCy = 0.5f;
     /** a tap on the picture pauses / resumes instead of being the mouse (set per game) */
     boolean tapPauses;
@@ -651,7 +652,7 @@ final class GameView extends View {
                 float fx = (ax + bx) / 2, fy = (ay + by) / 2;
                 float u = zoomCx + (fx - picture.centerX()) / (picture.width() * zoom);
                 float v = zoomCy + (fy - picture.centerY()) / (picture.height() * zoom);
-                zoom = Math.max(1f, Math.min(8f, zoom * after / before));
+                zoom = Math.max(1f, Math.min(MAX_ZOOM, zoom * after / before));
                 zoomCx = u - (fx - picture.centerX()) / (picture.width() * zoom);
                 zoomCy = v - (fy - picture.centerY()) / (picture.height() * zoom);
             }
