@@ -18,7 +18,7 @@ atari/      ATARI: Android-приложение Atari 65XE (com.alexspec.atari),
             vendor/atari800 (ядро)
 dos/        DOS: Android-приложение «DOS 286» (com.alexspec.dos), подробно — dos/README.md
   java/     LibraryActivity (список игр), GameActivity (игра, процесс :game), GameView, EmuThread,
-            PcKeys, GameFiles (копии игр, музей, C:\ИМЯ), LaunchChoice (корень и программа), NativeDos
+            PcKeys, GameFiles (копии игр, музей, C:\ИМЯ), LaunchChoice (корень и программа), ScreenRenderer (экран), NativeDos
   jni/      native/engine.c (libretro-фронтенд, история, сохранения), jni.c, vendor/dosbox-pure
 shell/      ROM: оболочка в ПЗУ «Специалиста»
   src/      main.asm (оболочка) и devel.asm (среда разработки, ADR-019) — верхние файлы;
@@ -132,6 +132,9 @@ docs/       i8080-tutorial.html (DOC-001), handoffs/ (старые переда�
   рабочая; files/mounts/<игра>/<ИМЯ> — ссылка на корень игры, монтируется как C:, игра видна как C:\ИМЯ.
 - Запуск (ADR-028, `LaunchChoice`): корень и программа выбираются при добавлении (настройки root:/exe:);
   GameActivity пишет files/mounts/<игра>/AUTOBOOT.DBP = C:\ИМЯ\ПРОГРАММА, и DOSBox стартует её без меню.
+- Экран (ADR-030): `ScreenRenderer` (GLSurfaceView под GameView, GLES 2) + `assets/screen.frag` — режимы
+  «чёткие пиксели» (одной ширины), VGA, цветной/ч-б телевизор, зелёный/янтарный монитор; лупа на паузе
+  (zoom/центр в шейдер). GameView оставляет место картинки прозрачным. Проверка шейдера на ПК — moderngl/EGL.
 - Джойстик (`GameView`): плавающий — центр там, где палец коснулся зоны слева; кнопки справа — сетка
   наибольшего размера, не шире ¼ экрана.
 - Ядро запускается один раз на процесс (повторный старт падает внутри DOSBox), поэтому игра —

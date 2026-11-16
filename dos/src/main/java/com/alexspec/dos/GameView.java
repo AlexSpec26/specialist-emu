@@ -66,6 +66,15 @@ final class GameView extends View {
     private final Paint bmpPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
 
     private final RectF screen = new RectF();
+    /** where the picture is actually drawn: its 4:3 (or whatever) inside screen */
+    private final RectF picture = new RectF();
+    /** draws the picture through the phone's video chip (screen modes); null or failed: drawn here */
+    ScreenRenderer screenRenderer;
+    Runnable requestRender;
+    /** the pause magnifier: 1…8, and the source point (0..1) in the middle */
+    private float zoom = 1, zoomCx = 0.5f, zoomCy = 0.5f;
+    /** a tap on the picture pauses / resumes instead of being the mouse (set per game) */
+    boolean tapPauses;
     private final RectF toolbar = new RectF();
     private final RectF controls = new RectF();
     private final List<Btn> buttons = new ArrayList<>();
@@ -113,7 +122,7 @@ final class GameView extends View {
     }
 
     /** what each finger holds: T_* or a key code (≥ T_KEY) */
-    private static final int T_NONE = 0, T_SCREEN = 1, T_PAD = 2, T_BUTTON = 3, T_KEY = 1000;
+    private static final int T_NONE = 0, T_SCREEN = 1, T_PAD = 2, T_BUTTON = 3, T_LOOK = 4, T_KEY = 1000;
     private final SparseArray<Integer> fingers = new SparseArray<>();
     private final int[] held = new int[512]; // how many sources hold each key
     private final int[] padDir = new int[2]; // keys held by the pad's direction
@@ -341,9 +350,21 @@ final class GameView extends View {
 
     @Override
     protected void onDraw(Canvas c) {
-        c.drawColor(0xFF0E1014);
-        drawPicture(c);
-        if (paused) drawPauseSign(c);
+        updatePictureRect();
+        boolean gl = screenRenderer != null && !screenRenderer.failed;
+        if (gl) {
+            // the picture's place stays transparent: the screen renderer's surface is under it
+            c.save();
+            if (android.os.Build.VERSION.SDK_INT >= 26) c.clipOutRect(picture);
+            else c.clipRect(picture, android.graphics.Region.Op.DIFFERENCE);
+            c.drawColor(BACKGROUND);
+            c.restore();
+        } else {
+            c.drawColor(BACKGROUND);
+            drawPicture(c);
+        }
+        if (zoom > 1.01f) drawZoomLabel(c);
+        if (paused && zoom <= 1.01f) drawPauseSign(c);
         if (!landscape) {
             fill.setColor(0xFF181B22);
             c.drawRect(toolbar, fill);
@@ -372,6 +393,32 @@ final class GameView extends View {
     private Btn findButton(int id) {
         for (Btn b : buttons) if (b.id == id) return b;
         return buttons.get(0);
+    }
+
+    static final int BACKGROUND = 0xFF0E1014;
+
+    /** the picture's rectangle (aspect kept inside screen); tells the renderer when it moves */
+    private void updatePictureRect() {
+        double asp = aspect();
+        float sw = screen.width(), sh = screen.height();
+        if (sw <= 0 || sh <= 0) return;
+        if (sw / sh > asp) sw = (float) (sh * asp);
+        else sh = (float) (sw / asp);
+        float l = screen.centerX() - sw / 2, t = screen.centerY() - sh / 2;
+        if (l != picture.left || t != picture.top || sw != picture.width() || sh != picture.height()) {
+            picture.set(l, t, l + sw, t + sh);
+            if (screenRenderer != null) {
+                screenRenderer.setRect(picture.left, picture.top, picture.width(), picture.height());
+                if (requestRender != null) requestRender.run();
+            }
+        }
+    }
+
+    private void drawZoomLabel(Canvas c) {
+        text.setTextSize(13 * dp);
+        text.setColor(0xFFFFE070);
+        String s = String.format(java.util.Locale.ROOT, "×%.1f", zoom).replace('.', ',');
+        c.drawText(s, picture.right - 28 * dp, picture.top + 20 * dp, text);
     }
 
     private void drawPicture(Canvas c) {
@@ -496,6 +543,7 @@ final class GameView extends View {
             }
         }
         padDir[0] = padDir[1] = 0;
+        looking.clear();
         stickOn = false;
         stickFinger = -1;
         fingers.clear();
@@ -513,7 +561,8 @@ final class GameView extends View {
             for (int i = 0; i < padKeys.length; i++) if (padCells[i].contains(x, y)) return T_KEY + padKeys[i];
             if (padZone.contains(x, y)) return stickFinger < 0 ? T_PAD : T_NONE;
         }
-        if (screen.contains(x, y)) return T_SCREEN;
+        // in the pause (or when a tap pauses) the picture is for looking: magnifier, not mouse
+        if (screen.contains(x, y)) return paused || tapPauses ? T_LOOK : T_SCREEN;
         return T_NONE;
     }
 
@@ -559,6 +608,93 @@ final class GameView extends View {
         invalidate();
     }
 
+    // ------------------------------------------------------------------ the magnifier (pause)
+
+    private final SparseArray<float[]> looking = new SparseArray<>();
+    private long lookDownAt, lastTapAt;
+    private float lookDownX, lookDownY;
+    private boolean lookMoved;
+
+    private void lookDown(int id, float x, float y) {
+        looking.put(id, new float[]{x, y});
+        if (looking.size() == 1) {
+            lookDownAt = System.currentTimeMillis();
+            lookDownX = x;
+            lookDownY = y;
+            lookMoved = false;
+        } else {
+            lookMoved = true; // two fingers: a pinch, not a tap
+        }
+    }
+
+    private void lookMove(int id, float x, float y) {
+        float[] p = looking.get(id);
+        if (p == null) return;
+        if (Math.hypot(x - lookDownX, y - lookDownY) > 12 * dp) lookMoved = true;
+        if (!paused || picture.width() <= 0) {
+            p[0] = x;
+            p[1] = y;
+            return;
+        }
+        if (looking.size() == 1) {
+            // one finger drags the enlarged picture
+            zoomCx -= (x - p[0]) / (picture.width() * zoom);
+            zoomCy -= (y - p[1]) / (picture.height() * zoom);
+        } else if (looking.keyAt(0) == id || looking.keyAt(1) == id) {
+            // two fingers pinch; the point between them stays where it is
+            float[] a = looking.valueAt(0), b = looking.valueAt(1);
+            float ax = a[0], ay = a[1], bx = b[0], by = b[1];
+            float before = (float) Math.hypot(ax - bx, ay - by);
+            if (looking.keyAt(0) == id) { ax = x; ay = y; } else { bx = x; by = y; }
+            float after = (float) Math.hypot(ax - bx, ay - by);
+            if (before > 10 * dp && after > 10 * dp) {
+                float fx = (ax + bx) / 2, fy = (ay + by) / 2;
+                float u = zoomCx + (fx - picture.centerX()) / (picture.width() * zoom);
+                float v = zoomCy + (fy - picture.centerY()) / (picture.height() * zoom);
+                zoom = Math.max(1f, Math.min(8f, zoom * after / before));
+                zoomCx = u - (fx - picture.centerX()) / (picture.width() * zoom);
+                zoomCy = v - (fy - picture.centerY()) / (picture.height() * zoom);
+            }
+        }
+        p[0] = x;
+        p[1] = y;
+        applyZoom();
+    }
+
+    private void lookUp(int id, float x, float y) {
+        boolean last = looking.size() == 1 && looking.get(id) != null;
+        looking.remove(id);
+        if (!last || lookMoved || System.currentTimeMillis() - lookDownAt > 350) return;
+        // a tap
+        long now = System.currentTimeMillis();
+        if (tapPauses) {
+            host.onPauseToggle();
+        } else if (paused && now - lastTapAt < 350) {
+            resetZoom(); // double tap: the whole picture again
+        }
+        lastTapAt = now;
+    }
+
+    private void applyZoom() {
+        float half = 0.5f / zoom;
+        zoomCx = Math.max(half, Math.min(1 - half, zoomCx));
+        zoomCy = Math.max(half, Math.min(1 - half, zoomCy));
+        if (screenRenderer != null) {
+            screenRenderer.zoom = zoom;
+            screenRenderer.centerX = zoomCx;
+            screenRenderer.centerY = zoomCy;
+            if (requestRender != null) requestRender.run();
+        }
+        invalidate();
+    }
+
+    /** back to the whole picture (when the game goes on) */
+    void resetZoom() {
+        zoom = 1;
+        zoomCx = zoomCy = 0.5f;
+        applyZoom();
+    }
+
     private int screenFingers() {
         int n = 0;
         for (int i = 0; i < fingers.size(); i++) if (fingers.valueAt(i) == T_SCREEN) n++;
@@ -594,6 +730,8 @@ final class GameView extends View {
                     stickCx = x;
                     stickCy = y;
                     updatePad(x, y, false);
+                } else if (t == T_LOOK) {
+                    lookDown(id, x, y);
                 } else if (t == T_SCREEN) {
                     if (screenFinger < 0) screenFinger = id;
                     int i = ev.findPointerIndex(screenFinger);
@@ -607,6 +745,7 @@ final class GameView extends View {
                     Integer t = fingers.get(id);
                     if (t == null) continue;
                     if (t == T_PAD) updatePad(ev.getX(i), ev.getY(i), false);
+                    else if (t == T_LOOK) lookMove(id, ev.getX(i), ev.getY(i));
                     else if (t == T_SCREEN && id == screenFinger) sendPointer(ev.getX(i), ev.getY(i), true);
                 }
                 return true;
@@ -620,6 +759,7 @@ final class GameView extends View {
                     Integer t = fingers.get(id);
                     if (t == null) continue;
                     if (t >= T_KEY) press(t - T_KEY, false);
+                    else if (t == T_LOOK) lookUp(id, ev.getX(i), ev.getY(i));
                     else if (t == T_PAD) {
                         stickOn = false;
                         stickFinger = -1;
@@ -649,6 +789,7 @@ final class GameView extends View {
                     }
                     stickFinger = -1;
                     fingers.clear();
+                    looking.clear();
                     screenFinger = -1;
                 }
                 invalidate();
