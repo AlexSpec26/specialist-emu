@@ -16,7 +16,7 @@ uniform sampler2D u_tex;
 uniform vec2 u_texSize;   // source picture, pixels (320x200 …)
 uniform vec2 u_outSize;   // picture on the phone, screen pixels (without zoom)
 uniform float u_mode;
-uniform float u_zoom;     // 1 … 8 (pause magnifier)
+uniform float u_zoom;     // 1 … 24 (pause magnifier)
 uniform vec2 u_center;    // source point (0..1) in the middle of the view
 
 const vec3 LUMA = vec3(0.299, 0.587, 0.114);
@@ -47,6 +47,17 @@ vec3 tvRow(float x, float y) {
     vec3 narrow = row(x, y, 0.45);
     vec3 wide = row(x, y, 1.1);
     return wide - dot(wide, LUMA) + dot(narrow, LUMA);
+}
+
+// how much of [a, b] (in triads) falls on stripe k (0 R, 1 G, 2 B) of a mask with three equal
+// stripes per triad: exact average, so a pixel wider than a stripe gets the mix, not a sample
+float stripeCum(float t, float k) {
+    float f = floor(t);
+    return f / 3.0 + clamp(t - f - k / 3.0, 0.0, 1.0 / 3.0);
+}
+
+float stripe(float a, float b, float k) {
+    return (stripeCum(b, k) - stripeCum(a, k)) / max(b - a, 1e-4);
 }
 
 // a beam's brightness across its line: wider for brighter colours (as on real tubes)
@@ -137,17 +148,24 @@ void main() {
     vec3 plain = c0;
     col = mix(plain, col * (vga ? 1.15 : 1.35), lineStrength);
 
-    // the mask: colour tubes only; a triad is 3 tube pixels wide (3 screen pixels at zoom 1), so
-    // the magnifier enlarges it; it fades out when a picture dot gets fewer than ~3 screen pixels
+    // the mask: colour tubes only. Its triads are locked to the picture's dots (a whole number of
+    // triads per dot, about 3 screen pixels each at zoom 1), so every dot sees the same mask — no
+    // coloured bands where a dither or thin line beats against it — and each stripe is averaged
+    // over the screen pixel it falls on, so stripes thinner than a pixel turn grey instead of
+    // shimmering. Under the magnifier the triads grow with the picture.
     if (mode == 1 || mode == 2) {
         float dots = u_texSize.x * (u_texSize.x <= 400.0 ? 2.0 : 1.0);
-        float pxPerDot = u_outSize.x * u_zoom / dots;
-        float maskStrength = smoothstep(1.2, 2.6, pxPerDot) * (mode == 1 ? 0.35 : 0.45);
-        float shift = mode == 1 ? mod(floor(tube.y / 3.0), 2.0) * 1.5 : 0.0;   // dot triads stagger
-        float m = mod(floor(tube.x + shift), 3.0);
-        vec3 mask = vec3(1.0 - maskStrength);
-        if (m < 0.5) mask.r = 1.0; else if (m < 1.5) mask.g = 1.0; else mask.b = 1.0;
-        col *= mask * (1.0 + maskStrength * 0.6);
+        float perDot = max(1.0, floor(u_outSize.x / dots / 3.0 + 0.5));   // triads per dot, at zoom 1
+        float triads = dots * perDot;                                      // across the picture
+        float t = uv.x * triads;
+        if (mode == 1) t += mod(li, 2.0) * 0.5;                            // dot triads stagger by line
+        float w = triads / (u_outSize.x * u_zoom);                         // one screen pixel, in triads
+        vec3 cov = vec3(stripe(t - 0.5 * w, t + 0.5 * w, 0.0),
+                        stripe(t - 0.5 * w, t + 0.5 * w, 1.0),
+                        stripe(t - 0.5 * w, t + 0.5 * w, 2.0));
+        float strength = mode == 1 ? 0.25 : 0.33;
+        vec3 mask = (1.0 - strength) + strength * 3.0 * cov;   // averages to 1: no loss of brightness
+        col *= mix(vec3(1.0), mask, smoothstep(0.8, 1.6, u_outSize.x * u_zoom / triads));
     }
 
     col *= phosphor;
