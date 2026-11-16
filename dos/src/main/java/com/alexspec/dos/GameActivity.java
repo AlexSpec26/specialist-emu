@@ -48,6 +48,8 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
     private final Handler ui = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
     private GameView view;
+    private android.opengl.GLSurfaceView glView;
+    private ScreenRenderer screenRenderer;
     private EmuThread emu;
     private String name;
     private File states;
@@ -80,8 +82,6 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
         view.controlsMode = prefs.getInt("controls:" + name, GameView.CONTROLS_PAD);
         view.padKeys = loadPad();
         view.dpadMode = Math.max(0, Math.min(PcKeys.DPAD.length - 1, prefs.getInt("dpad:" + name, PcKeys.DPAD_ARROWS)));
-        setContentView(view);
-        hideSystemBars();
 
         NativeDos.option("dosbox_pure_cycles", prefs.getString("cpu:" + name, DEFAULT_CPU));
         String content = path;
@@ -99,6 +99,26 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
         emu = new EmuThread(system.getAbsolutePath(), saves.getAbsolutePath(), content, this);
         emu.sound = prefs.getBoolean("sound", true);
         view.attach(emu);
+        view.tapPauses = prefs.getInt("touch:" + name, 0) == 1;
+        // the picture through the phone's video chip (screen modes, magnifier), under the controls
+        screenRenderer = new ScreenRenderer(this, emu, GameView.BACKGROUND);
+        screenRenderer.mode = Math.max(0, Math.min(ScreenRenderer.MODE_NAMES.length - 1, prefs.getInt("screen:" + name, 0)));
+        glView = new android.opengl.GLSurfaceView(this);
+        glView.setEGLContextClientVersion(2);
+        glView.setRenderer(screenRenderer);
+        glView.setRenderMode(android.opengl.GLSurfaceView.RENDERMODE_WHEN_DIRTY);
+        view.screenRenderer = screenRenderer;
+        view.requestRender = glView::requestRender;
+        android.widget.FrameLayout root = new android.widget.FrameLayout(this);
+        root.addView(glView);
+        root.addView(view);
+        // the system bars' insets go to the controls (the picture's surface takes no part)
+        root.setOnApplyWindowInsetsListener((v, in) -> {
+            view.dispatchApplyWindowInsets(in);
+            return in;
+        });
+        setContentView(root);
+        hideSystemBars();
         emu.start();
         offerContinue();
     }
@@ -139,7 +159,8 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
             lastAspect = a;
             ui.post(view::relayout);
         }
-        view.postInvalidate();
+        glView.requestRender();
+        if (screenRenderer.failed || frameCount % 8 == 0) view.postInvalidate();
     }
 
     // ------------------------------------------------------------------ GameView.Host
@@ -164,6 +185,14 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
         acts.add(this::configurePad);
         items.add(view.controlsMode == GameView.CONTROLS_PAD ? "⌨  Управление: джойстик → клавиатура" : "🎮  Управление: клавиатура → джойстик");
         acts.add(this::onControlsToggle);
+        items.add("📺  Экран: " + ScreenRenderer.MODE_NAMES[screenRenderer.mode] + "…");
+        acts.add(this::chooseScreen);
+        items.add(view.tapPauses ? "👆  Касание картинки: пауза → мышь" : "👆  Касание картинки: мышь → пауза");
+        acts.add(() -> {
+            view.tapPauses = !view.tapPauses;
+            prefs.edit().putInt("touch:" + name, view.tapPauses ? 1 : 0).apply();
+            view.showNote(view.tapPauses ? "Касание картинки — пауза" : "Касание картинки — мышь");
+        });
         items.add(emu.sound ? "🔇  Выключить звук" : "🔊  Включить звук");
         acts.add(() -> {
             emu.sound = !emu.sound;
@@ -206,6 +235,7 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
         boolean p = userPaused;
         view.paused = p;
         if (p) view.releaseAll();
+        else view.resetZoom();
         emu.setPaused(p);
         view.relayout();
     }
@@ -251,6 +281,19 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
                 .setTitle("Скорость")
                 .setSingleChoiceItems(names, slowIndex, (d, w) -> {
                     setSpeed(w);
+                    d.dismiss();
+                })
+                .show();
+    }
+
+    private void chooseScreen() {
+        new AlertDialog.Builder(this)
+                .setTitle("Экран")
+                .setSingleChoiceItems(ScreenRenderer.MODE_NAMES, screenRenderer.mode, (d, w) -> {
+                    screenRenderer.mode = w;
+                    prefs.edit().putInt("screen:" + name, w).apply();
+                    glView.requestRender();
+                    view.showNote(ScreenRenderer.MODE_NAMES[w]);
                     d.dismiss();
                 })
                 .show();
@@ -634,12 +677,14 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
         if (!restarting) autosave();
         view.releaseAll();
         emu.setPaused(true);
+        glView.onPause();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         hideSystemBars();
+        glView.onResume();
         emu.setPaused(userPaused);
     }
 
@@ -697,6 +742,10 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
                         + "а не игры: при замедлении в 4 раза ⟲ 5 с вернёт на 5 секунд, которые вы прожили, то есть на "
                         + "1¼ секунды игры. Скорость — реальная или медленнее в 1,5, 2, 3, 4, 8 раз; звук при этом "
                         + "тянется ниже.\n\n"
+                        + "Меню → «Экран»: чёткие пиксели, монитор VGA, цветной или чёрно-белый телевизор, зелёный или "
+                        + "янтарный монитор. На паузе картинку можно рассмотреть: два пальца — увеличить до ×8, один — "
+                        + "двигать, двойное касание — снова целиком. Меню → «Касание картинки»: мышь или пауза (для игр без "
+                        + "мыши: коснулся картинки — пауза, ещё раз — дальше).\n\n"
                         + "💾 и 📂 — быстрое сохранение и загрузка, в меню ещё «Сохранить как…» и «Загрузить из файла». "
                         + "Сохранение хранит и историю: после загрузки можно отмотать на минуту назад.\n\n"
                         + "При выходе положение сохраняется само, при следующем запуске предлагается продолжить.\n\n"
