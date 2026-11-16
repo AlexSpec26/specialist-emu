@@ -11,13 +11,14 @@ import com.alexspec.specialist.core.SpecKeys;
 final class ControlConfig {
     static final int UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3;
     static final int BUTTON0 = 4;
-    static final int MAX_BUTTONS = 4;
+    static final int MAX_BUTTONS = 8;
     static final int SLOTS = BUTTON0 + MAX_BUTTONS;
     static final String DEFAULT_PROFILE = "";
 
     static final String[] SLOT_NAMES = {
         "Джойстик ↑", "Джойстик ↓", "Джойстик ←", "Джойстик →",
         "Кнопка 1", "Кнопка 2", "Кнопка 3", "Кнопка 4",
+        "Кнопка 5", "Кнопка 6", "Кнопка 7", "Кнопка 8",
     };
 
     final int[] keys = new int[SLOTS];
@@ -35,6 +36,10 @@ final class ControlConfig {
         keys[BUTTON0 + 1] = SpecKeys.ENTER;
         keys[BUTTON0 + 2] = SpecKeys.ESC;
         keys[BUTTON0 + 3] = SpecKeys.byLabel("F1");
+        keys[BUTTON0 + 4] = SpecKeys.byLabel("F2");
+        keys[BUTTON0 + 5] = SpecKeys.byLabel("F3");
+        keys[BUTTON0 + 6] = SpecKeys.byLabel("F4");
+        keys[BUTTON0 + 7] = SpecKeys.TAB;
     }
 
     void copyFrom(ControlConfig o) {

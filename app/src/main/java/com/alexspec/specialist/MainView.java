@@ -96,6 +96,7 @@ final class MainView extends View {
     void setPaused(boolean p) {
         if (paused == p) return;
         paused = p;
+        if (!p) resetZoom();
         if (!p && stepInfo) {
             stepInfo = false;
             layoutControls(getWidth(), getHeight());
@@ -121,10 +122,20 @@ final class MainView extends View {
     private final RectF joyZone = new RectF();
     private final RectF btnZone = new RectF();
     private float toolbarY = -1, toolbarH;
-    private float joyCx, joyCy, joyR;
+    /** the stick: at rest its ring stands at joyRestX/Y; a touch in its zone puts the centre
+     *  (joyCx/Cy) under the finger, as in DOS 286 (Dysmantle-style) */
+    private float joyCx, joyCy, joyR, joyRestX, joyRestY;
     private final float[] btnX = new float[ControlConfig.MAX_BUTTONS];
     private final float[] btnY = new float[ControlConfig.MAX_BUTTONS];
-    private float btnR;
+    private final float[] btnRs = new float[ControlConfig.MAX_BUTTONS];
+    /** where a finger counts as on button i: its whole cell of the grid */
+    private final RectF[] btnCells = new RectF[ControlConfig.MAX_BUTTONS];
+    /** the picture through the phone's video chip (screen modes, magnifier); null = drawn here */
+    ScreenRenderer screenRenderer;
+    Runnable requestRender;
+    /** the pause magnifier: 1…MAX_ZOOM and the picture point (0..1) in the middle */
+    private static final float MAX_ZOOM = 24f;
+    private float zoom = 1, zoomCx = 0.5f, zoomCy = 0.5f;
     private boolean landscape;
     private float insL, insT, insR, insB;
 
@@ -181,6 +192,7 @@ final class MainView extends View {
         text.setColor(Color.WHITE);
         setHapticFeedbackEnabled(true);
         java.util.Arrays.fill(btnCode, SpecKeys.NONE);
+        for (int i = 0; i < btnCells.length; i++) btnCells[i] = new RectF();
         buildKeyboard();
         map = new MapPanel(emu, new MapPanel.Host() {
             @Override
@@ -422,13 +434,14 @@ final class MainView extends View {
                 joyCx = ox + w * 0.25f;
                 joyCy = cy;
                 joyR = r;
-                layoutButtons(ox + w * 0.75f, cy, r);
+                float at = Math.min(cy - r * 1.2f, bottom - r * 2.4f);
+                layoutButtons(new RectF(ox + w / 2f + 8 * dp, at, ox + w - 8 * dp, bottom - 8 * dp), (fullW) / 4f);
             } else {
                 float cy = top + regionH * 0.5f;
-                joyCx = ox + w * 0.27f;
+                joyCx = ox + w * 0.25f;
                 joyCy = cy;
-                joyR = Math.min(w * 0.21f, regionH * 0.32f);
-                layoutButtons(ox + w * 0.73f, cy, Math.min(w * 0.2f, regionH * 0.3f));
+                joyR = Math.min(w * 0.18f, regionH * 0.3f);
+                layoutButtons(new RectF(ox + w / 2f + 8 * dp, top + 8 * dp, ox + w - 8 * dp, bottom - 8 * dp), fullW / 4f);
             }
             // low keys (roughly square), so the memory map stays visible above the keyboard
             float rowH = Math.min(regionH / KBD_ROWS, (mapVisible ? 34 : 46) * dp);
@@ -451,29 +464,57 @@ final class MainView extends View {
             float side = sx - ox;
             joyCx = ox + side / 2f;
             joyCy = oy + h * 0.62f;
-            joyR = Math.min(side * 0.42f, h * 0.26f);
-            layoutButtons(ox + w - side / 2f, oy + h * 0.62f, Math.min(side * 0.42f, h * 0.26f));
+            joyR = Math.min(side * 0.4f, h * 0.24f);
+            layoutButtons(new RectF(sx + sw + 8 * dp, kbdBtnRect.bottom + 16 * dp, ox + w - 8 * dp, oy + h - 8 * dp), fullW / 4f);
             float kh = Math.min(h * 0.62f, KBD_ROWS * 54 * dp);
             kbdRect.set(ox, oy + h - kh, ox + w, oy + h);
         }
+        joyRestX = joyCx;
+        joyRestY = joyCy;
         knobX = joyCx;
         knobY = joyCy;
         layoutKeys();
+        if (screenRenderer != null) {
+            screenRenderer.setRect(screenRect.left, screenRect.top, screenRect.width(), screenRect.height());
+            if (requestRender != null) requestRender.run();
+        }
     }
 
-    private void layoutButtons(float cx, float cy, float r) {
+    /**
+     * The buttons as in DOS 286: as large as the area allows (the more of them, the smaller), no
+     * wider than maxD; the grid with the most room per button wins, rows filled left to right,
+     * top to bottom, the grid in the middle of the area. A finger counts on its whole cell.
+     */
+    private void layoutButtons(RectF area, float maxD) {
         int n = Math.max(1, Math.min(buttonCount, ControlConfig.MAX_BUTTONS));
-        float[][] pos;
-        switch (n) {
-            case 1: pos = new float[][]{{0, 0}}; break;
-            case 2: pos = new float[][]{{-0.55f, 0.3f}, {0.55f, -0.3f}}; break;
-            case 3: pos = new float[][]{{-0.75f, 0.45f}, {0f, -0.05f}, {0.75f, -0.55f}}; break;
-            default: pos = new float[][]{{-0.75f, 0f}, {0f, 0.75f}, {0.75f, 0f}, {0f, -0.75f}}; break;
+        float g = 12 * dp;
+        int bestCols = 1;
+        float best = 0;
+        for (int cols = 1; cols <= n; cols++) {
+            int rows = (n + cols - 1) / cols;
+            float sz = Math.min((area.width() - g * (cols - 1)) / cols, (area.height() - g * (rows - 1)) / rows);
+            if (sz > best + 0.5f) {
+                best = sz;
+                bestCols = cols;
+            }
         }
-        btnR = r * (n >= 3 ? 0.4f : 0.5f);
+        int cols = bestCols, rows = (n + cols - 1) / cols;
+        float d = Math.max(16 * dp, Math.min(best, maxD));
+        float gx = cols > 1 ? Math.min((area.width() - cols * d) / (cols - 1), d * 0.3f) : 0;
+        float gy = rows > 1 ? Math.min((area.height() - rows * d) / (rows - 1), d * 0.3f) : 0;
+        gx = Math.max(gx, g * 0.5f);
+        gy = Math.max(gy, g * 0.5f);
+        float gridH = rows * d + (rows - 1) * gy;
+        float y0 = area.centerY() - gridH / 2;
         for (int i = 0; i < n; i++) {
-            btnX[i] = cx + pos[i][0] * r;
-            btnY[i] = cy + pos[i][1] * r;
+            int r = i / cols, c = i % cols;
+            int inRow = Math.min(cols, n - r * cols);
+            float rowW = inRow * d + (inRow - 1) * gx;
+            float x0 = area.centerX() - rowW / 2;
+            btnX[i] = x0 + c * (d + gx) + d / 2;
+            btnY[i] = y0 + r * (d + gy) + d / 2;
+            btnRs[i] = d / 2;
+            btnCells[i].set(btnX[i] - (d + gx) / 2, btnY[i] - (d + gy) / 2, btnX[i] + (d + gx) / 2, btnY[i] + (d + gy) / 2);
         }
     }
 
@@ -493,14 +534,23 @@ final class MainView extends View {
 
     @Override
     protected void onDraw(Canvas c) {
-        c.drawColor(Color.BLACK);
-        synchronized (emu.frame) {
-            System.arraycopy(emu.frame, 0, pixels, 0, pixels.length);
+        if (screenRenderer != null && !screenRenderer.failed) {
+            // the picture's place stays transparent: the screen renderer's surface is under it
+            c.save();
+            if (android.os.Build.VERSION.SDK_INT >= 26) c.clipOutRect(screenRect);
+            else c.clipRect(screenRect, android.graphics.Region.Op.DIFFERENCE);
+            c.drawColor(Color.BLACK);
+            c.restore();
+        } else {
+            c.drawColor(Color.BLACK);
+            synchronized (emu.frame) {
+                System.arraycopy(emu.frame, 0, pixels, 0, pixels.length);
+            }
+            screenBmp.setPixels(pixels, 0, Specialist.WIDTH, 0, 0, Specialist.WIDTH, Specialist.HEIGHT);
+            c.drawBitmap(screenBmp, srcRect, screenRect, bmpPaint);
         }
-        screenBmp.setPixels(pixels, 0, Specialist.WIDTH, 0, 0, Specialist.WIDTH, Specialist.HEIGHT);
-        c.drawBitmap(screenBmp, srcRect, screenRect, bmpPaint);
         // pause: only a small translucent sign in the middle; the step buttons are outside the picture
-        if (paused && machine.isRomLoaded() && pickPrompt == null) drawPauseSign(c);
+        if (paused && machine.isRomLoaded() && pickPrompt == null && zoom <= 1.01f) drawPauseSign(c);
 
         if (!machine.isRomLoaded()) {
             text.setTextSize(18 * dp);
@@ -697,10 +747,11 @@ final class MainView extends View {
     }
 
     private void drawControls(Canvas c) {
-        // joystick
-        fill.setColor(ca(0x33FFFFFF));
+        // joystick: a faint ring at rest, a clear one where the finger came down
+        boolean on = joyPointer >= 0;
+        fill.setColor(ca(on ? 0x33FFFFFF : 0x1AFFFFFF));
         c.drawCircle(joyCx, joyCy, joyR, fill);
-        stroke.setColor(ca(0x66FFFFFF));
+        stroke.setColor(ca(on ? 0x66FFFFFF : 0x33FFFFFF));
         stroke.setStrokeWidth(2 * dp);
         c.drawCircle(joyCx, joyCy, joyR, stroke);
         text.setTextSize(joyR * 0.28f);
@@ -714,6 +765,7 @@ final class MainView extends View {
         // buttons
         int n = Math.min(buttonCount, ControlConfig.MAX_BUTTONS);
         for (int i = 0; i < n; i++) {
+            float btnR = btnRs[i];
             boolean down = btnDown[i] > 0;
             fill.setColor(ca(down ? 0xEE5A7DFF : 0x66FFFFFF));
             c.drawCircle(btnX[i], btnY[i], btnR, fill);
@@ -721,7 +773,7 @@ final class MainView extends View {
             c.drawCircle(btnX[i], btnY[i], btnR, stroke);
             String label = shortLabel(config.keys[ControlConfig.BUTTON0 + i]);
             text.setColor(ca(0xFFFFFFFF));
-            float ts = btnR * 0.62f;
+            float ts = Math.min(btnR * 0.62f, 28 * dp);
             text.setTextSize(ts);
             float tw = text.measureText(label);
             if (tw > btnR * 1.6f) text.setTextSize(ts * btnR * 1.6f / tw);
@@ -831,7 +883,7 @@ final class MainView extends View {
             // over the map only the controls themselves react, everything else inspects memory
             int bb = hitButton(x, y, 1.0f);
             if (bb >= 0) return T_BUTTON + bb;
-            float dx = x - joyCx, dy = y - joyCy;
+            float dx = x - joyRestX, dy = y - joyRestY;
             if (dx * dx + dy * dy <= joyR * joyR * 1.3f) return T_JOY;
             return T_MAP;
         }
@@ -855,20 +907,9 @@ final class MainView extends View {
     }
 
     private int hitButton(float x, float y, float slack) {
-        if (!btnZone.contains(x, y)) return -1;
         int n = Math.min(buttonCount, ControlConfig.MAX_BUTTONS);
-        int best = -1;
-        float bestD = Float.MAX_VALUE;
-        for (int i = 0; i < n; i++) {
-            float dx = x - btnX[i], dy = y - btnY[i];
-            float d = dx * dx + dy * dy;
-            if (d < bestD) {
-                bestD = d;
-                best = i;
-            }
-        }
-        float lim = btnR * slack;
-        return (best >= 0 && bestD <= lim * lim) ? best : -1;
+        for (int i = 0; i < n; i++) if (btnCells[i].contains(x, y)) return i;
+        return -1;
     }
 
     private static RectF inflate(RectF r, float d) {
@@ -895,7 +936,9 @@ final class MainView extends View {
                     int id = ev.getPointerId(i);
                     int t = pointers.get(id, T_NONE);
                     float x = ev.getX(i), y = ev.getY(i);
-                    if (t == T_MAP) {
+                    if (t == T_SCREEN) {
+                        lookMove(id, x, y);
+                    } else if (t == T_MAP) {
                         map.move(id, x, y);
                     } else if (t == T_PANEL) {
                         map.panelMove(id, x, y);
@@ -943,7 +986,11 @@ final class MainView extends View {
             showMachineInfo();
             return;
         }
-        if (t == T_MENU || t == T_KBD || t == T_SCREEN) {
+        if (t == T_SCREEN) {
+            lookDown(id, x, y);
+            return;
+        }
+        if (t == T_MENU || t == T_KBD) {
             haptic();
             return;
         }
@@ -961,6 +1008,8 @@ final class MainView extends View {
                 return;
             }
             joyPointer = id;
+            joyCx = x; // the centre where the finger came down
+            joyCy = y;
             updateJoy(x, y);
             return;
         }
@@ -1010,7 +1059,11 @@ final class MainView extends View {
             return;
         }
         if (t == T_SCREEN) {
-            if (pickPrompt == null) host.onScreenTapped();
+            // a tap pauses / goes on; a drag or a pinch was the magnifier
+            if (lookUp(id) && pickPrompt == null) {
+                haptic();
+                host.onScreenTapped();
+            }
             return;
         }
         if (t == T_MENU) {
@@ -1028,6 +1081,8 @@ final class MainView extends View {
         }
         if (t == T_JOY && id == joyPointer) {
             joyPointer = -1;
+            joyCx = joyRestX;
+            joyCy = joyRestY;
             knobX = joyCx;
             knobY = joyCy;
             setJoyDirs(0);
@@ -1078,6 +1133,14 @@ final class MainView extends View {
     private void updateJoy(float x, float y) {
         float dx = x - joyCx, dy = y - joyCy;
         float dist = (float) Math.sqrt(dx * dx + dy * dy);
+        if (dist > joyR) {
+            // the finger went past the ring: the centre follows it (turning needs no return)
+            joyCx = x - dx * joyR / dist;
+            joyCy = y - dy * joyR / dist;
+            dx = x - joyCx;
+            dy = y - joyCy;
+            dist = joyR;
+        }
         float lim = joyR * 0.62f;
         if (dist > lim) {
             knobX = joyCx + dx / dist * lim;
@@ -1132,6 +1195,83 @@ final class MainView extends View {
         }
         if (pressed && joyDirs == 0) haptic();
         joyDirs = dirs;
+    }
+
+    // ------------------------------------------------------------------ the magnifier (pause)
+
+    private final android.util.SparseArray<float[]> looking = new android.util.SparseArray<>();
+    private long lookDownAt;
+    private float lookDownX, lookDownY;
+    private boolean lookMoved;
+
+    private void lookDown(int id, float x, float y) {
+        looking.put(id, new float[]{x, y});
+        if (looking.size() == 1) {
+            lookDownAt = System.currentTimeMillis();
+            lookDownX = x;
+            lookDownY = y;
+            lookMoved = false;
+        } else {
+            lookMoved = true; // two fingers: a pinch, not a tap
+        }
+    }
+
+    /** on the paused picture: one finger drags the enlarged picture, two fingers zoom (to ×24) */
+    private void lookMove(int id, float x, float y) {
+        float[] p = looking.get(id);
+        if (p == null) return;
+        if (Math.hypot(x - lookDownX, y - lookDownY) > 12 * dp) lookMoved = true;
+        boolean canZoom = paused && screenRenderer != null && !screenRenderer.failed && screenRect.width() > 0;
+        if (canZoom && looking.size() == 1) {
+            zoomCx -= (x - p[0]) / (screenRect.width() * zoom);
+            zoomCy -= (y - p[1]) / (screenRect.height() * zoom);
+            applyZoom();
+        } else if (canZoom && looking.size() >= 2 && (looking.keyAt(0) == id || looking.keyAt(1) == id)) {
+            float[] a = looking.valueAt(0), b = looking.valueAt(1);
+            float ax = a[0], ay = a[1], bx = b[0], by = b[1];
+            float before = (float) Math.hypot(ax - bx, ay - by);
+            if (looking.keyAt(0) == id) { ax = x; ay = y; } else { bx = x; by = y; }
+            float after = (float) Math.hypot(ax - bx, ay - by);
+            if (before > 10 * dp && after > 10 * dp) {
+                float fx = (ax + bx) / 2, fy = (ay + by) / 2;
+                float u = zoomCx + (fx - screenRect.centerX()) / (screenRect.width() * zoom);
+                float v = zoomCy + (fy - screenRect.centerY()) / (screenRect.height() * zoom);
+                zoom = Math.max(1f, Math.min(MAX_ZOOM, zoom * after / before));
+                zoomCx = u - (fx - screenRect.centerX()) / (screenRect.width() * zoom);
+                zoomCy = v - (fy - screenRect.centerY()) / (screenRect.height() * zoom);
+                applyZoom();
+            }
+        }
+        p[0] = x;
+        p[1] = y;
+    }
+
+    /** a finger left the picture; true if that was a tap */
+    private boolean lookUp(int id) {
+        boolean last = looking.size() == 1 && looking.get(id) != null;
+        looking.remove(id);
+        return last && !lookMoved && System.currentTimeMillis() - lookDownAt < 350;
+    }
+
+    private void applyZoom() {
+        float half = 0.5f / zoom;
+        zoomCx = Math.max(half, Math.min(1 - half, zoomCx));
+        zoomCy = Math.max(half, Math.min(1 - half, zoomCy));
+        if (screenRenderer != null) {
+            screenRenderer.zoom = zoom;
+            screenRenderer.centerX = zoomCx;
+            screenRenderer.centerY = zoomCy;
+            if (requestRender != null) requestRender.run();
+        }
+        invalidate();
+    }
+
+    /** the whole picture again (play goes on) */
+    void resetZoom() {
+        if (zoom == 1 && zoomCx == 0.5f && zoomCy == 0.5f) return;
+        zoom = 1;
+        zoomCx = zoomCy = 0.5f;
+        applyZoom();
     }
 
     // ------------------------------------------------------------------ external controllers

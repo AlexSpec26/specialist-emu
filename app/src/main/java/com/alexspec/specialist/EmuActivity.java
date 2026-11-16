@@ -18,6 +18,7 @@ import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import com.alexspec.specialist.core.SpecKeys;
@@ -45,6 +46,8 @@ public final class EmuActivity extends Activity implements MainView.Host {
     private EmuThread emu;
     private Specialist machine;
     private MainView view;
+    private ScreenRenderer screenRenderer;
+    private android.opengl.GLSurfaceView glView;
     private SharedPreferences prefs;
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -76,10 +79,28 @@ public final class EmuActivity extends Activity implements MainView.Host {
         emu = new EmuThread(() -> {
             MainView v = view;
             if (v != null) v.postInvalidateOnAnimation();
+            android.opengl.GLSurfaceView g = glView;
+            if (g != null) g.requestRender();
         });
         machine = emu.machine;
         view = new MainView(this, emu, this);
-        setContentView(view);
+        // the picture goes through the phone's video chip (screen modes, magnifier), as in DOS 286;
+        // MainView on top keeps the picture's place transparent
+        screenRenderer = new ScreenRenderer(this, emu, 0xFF000000);
+        glView = new android.opengl.GLSurfaceView(this);
+        glView.setEGLContextClientVersion(2);
+        glView.setRenderer(screenRenderer);
+        glView.setRenderMode(android.opengl.GLSurfaceView.RENDERMODE_WHEN_DIRTY);
+        view.screenRenderer = screenRenderer;
+        view.requestRender = glView::requestRender;
+        FrameLayout root = new FrameLayout(this);
+        root.addView(glView);
+        root.addView(view);
+        root.setOnApplyWindowInsetsListener((v, in) -> {
+            view.dispatchApplyWindowInsets(in);
+            return in;
+        });
+        setContentView(root);
         applySettings();
 
         File rom = romFile();
@@ -114,6 +135,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
     protected void onResume() {
         super.onResume();
         resumed = true;
+        if (glView != null) glView.onResume();
         hideSystemBars();
         emu.setPaused(false);
         updateMic();
@@ -137,6 +159,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
             });
         }
         emu.setPaused(true);
+        if (glView != null) glView.onPause();
         super.onPause();
     }
 
@@ -328,6 +351,10 @@ public final class EmuActivity extends Activity implements MainView.Host {
 
     private void applySettings() {
         view.buttonCount = prefs.getInt("buttons", 3);
+        if (screenRenderer != null) {
+            screenRenderer.mode = Math.max(0, Math.min(ScreenRenderer.MODE_NAMES.length - 1, prefs.getInt("screenMode", 0)));
+            if (glView != null) glView.requestRender();
+        }
         view.joy8 = prefs.getBoolean("joy8", false);
         view.vibrate = prefs.getBoolean("vibrate", true);
         emu.colorMode = prefs.getInt("color", Specialist.COLOR_WHITE);
@@ -832,6 +859,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
             "Кнопок справа: " + view.buttonCount,
             "Джойстик: " + (view.joy8 ? "8 направлений" : "4 направления"),
             "Цвет экрана: " + colorNames[Math.max(0, Math.min(3, color))],
+            "Монитор: " + ScreenRenderer.MODE_NAMES[screenRenderer.mode],
             "Звук: " + (emu.sound ? "вкл" : "выкл"),
             "Вибрация: " + (view.vibrate ? "вкл" : "выкл"),
         };
@@ -840,7 +868,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
                 .setItems(items, (d, which) -> {
                     switch (which) {
                         case 0: {
-                            String[] counts = {"1", "2", "3", "4"};
+                            String[] counts = {"1", "2", "3", "4", "5", "6", "7", "8"};
                             show(new AlertDialog.Builder(this)
                                     .setTitle("Кнопок справа")
                                     .setSingleChoiceItems(counts, view.buttonCount - 1, (d2, w) -> {
@@ -867,7 +895,19 @@ public final class EmuActivity extends Activity implements MainView.Host {
                                     );
                             return;
                         }
-                        case 3:
+                        case 3: {
+                            show(new AlertDialog.Builder(this)
+                                    .setTitle("Монитор")
+                                    .setSingleChoiceItems(ScreenRenderer.MODE_NAMES, screenRenderer.mode, (d2, w) -> {
+                                        prefs.edit().putInt("screenMode", w).apply();
+                                        d2.dismiss();
+                                        applySettings();
+                                        showSettings();
+                                    })
+                                    );
+                            return;
+                        }
+                        case 4:
                             prefs.edit().putBoolean("sound", !emu.sound).apply();
                             break;
                         default:
