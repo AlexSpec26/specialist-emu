@@ -225,6 +225,22 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
                 .show();
     }
 
+    /**
+     * Any window over the game — its menu, a dialog, the notification shade — pauses it, as the
+     * pause button would; when the game has the screen again it goes on (unless paused by the user).
+     */
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (emu == null || view == null) return;
+        if (!hasFocus) {
+            view.releaseAll();
+            emu.setPaused(true);
+        } else {
+            emu.setPaused(userPaused);
+        }
+    }
+
     @Override
     public void onPauseToggle() {
         userPaused = !userPaused;

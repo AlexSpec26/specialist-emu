@@ -25,5 +25,6 @@ Each release publishes `dos-source-N.tar.gz`: the exact sources of that build.
 
 ## Test program
 
-`dos/tools/demo.asm` / `DEMO.COM` (72 bytes) and `dos/tools/rtc.asm` / `RTC.COM` were written for
+`dos/tools/demo.asm` / `DEMO.COM` (72 bytes), `dos/tools/rtc.asm` / `RTC.COM` and `dos/tools/mouse.asm` /
+`MOUSE.COM` were written for
 this project's tests.

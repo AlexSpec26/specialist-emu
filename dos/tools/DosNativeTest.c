@@ -71,6 +71,43 @@ int main(int argc, char **argv) {
         fflush(stdout);
         _exit(failures ? 1 : 0);
     }
+    if (strstr(demo, "MOUSE.COM")) {
+        /* the touch pad mouse: MOUSE.COM copies INT 33h buttons (ORed), x, y to 0000:0510.. */
+        CHECK(engine_open(dir, dir, demo), "open %s", demo);
+        run(140);
+        CHECK(MemBase[0x516] == 1, "MOUSE.COM runs");
+        int x0 = *(uint16_t *)(MemBase + 0x512), y0 = *(uint16_t *)(MemBase + 0x514);
+        /* one finger drags right and down: the mouse moves, no button */
+        engine_pointer(-20000, -20000, 1, 1);
+        run(3);
+        for (int i = 1; i <= 30; i++) {
+            engine_pointer(-20000 + i * 600, -20000 + i * 300, 1, 1);
+            run(1);
+        }
+        engine_pointer(-2000, -11000, 0, 0);
+        run(20);
+        int x1 = *(uint16_t *)(MemBase + 0x512), y1 = *(uint16_t *)(MemBase + 0x514);
+        CHECK(x1 > x0 + 20 && y1 > y0 + 10, "a drag moves the mouse: (%d,%d) -> (%d,%d)", x0, y0, x1, y1);
+        CHECK(MemBase[0x510] == 0, "a drag clicks nothing, buttons %d", MemBase[0x510]);
+        /* a tap: the left button */
+        engine_pointer(0, 0, 1, 1);
+        run(3);
+        engine_pointer(0, 0, 0, 0);
+        run(30);
+        CHECK(MemBase[0x510] & 1, "a tap is a left click, buttons %d", MemBase[0x510]);
+        /* a two-finger tap: the right button */
+        MemBase[0x510] = 0;
+        engine_pointer(0, 0, 1, 2);
+        run(3);
+        engine_pointer(0, 0, 1, 1); /* fingers come off one after the other */
+        run(1);
+        engine_pointer(0, 0, 0, 0);
+        run(30);
+        CHECK(MemBase[0x510] & 2, "a two-finger tap is a right click, buttons %d", MemBase[0x510]);
+        printf("TOUCH MOUSE: %s (drag (%d,%d) -> (%d,%d))\n", failures ? "FAIL" : "OK", x0, y0, x1, y1);
+        fflush(stdout);
+        _exit(failures ? 1 : 0);
+    }
     if (strstr(demo, "RTC.COM")) {
         /* the real-time clock (CMOS, ports 70h/71h) runs on emulated time: RTC.COM copies its
          * seconds, minutes, hours to 0000:0500.. */
