@@ -225,7 +225,6 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
                 .show();
     }
 
-    @Override
     /**
      * Any window over the game — its menu, a dialog, the notification shade — pauses it, as the
      * pause button would; when the game has the screen again it goes on (unless paused by the user).
@@ -242,6 +241,7 @@ public final class GameActivity extends Activity implements GameView.Host, EmuTh
         }
     }
 
+    @Override
     public void onPauseToggle() {
         userPaused = !userPaused;
         applyPause();
