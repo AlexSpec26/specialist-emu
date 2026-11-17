@@ -23,6 +23,7 @@ test: $(OUT)/dos-test
 	rm -rf $(OUT)/boot && mkdir -p $(OUT)/boot && ln -s $(abspath $(OUT)/folder) $(OUT)/boot/GAME && printf 'C:\\GAME\\DEMO.COM' > $(OUT)/boot/AUTOBOOT.DBP
 	$(OUT)/dos-test $(OUT)/boot $(OUT)/bootwork
 	$(OUT)/dos-test dos/tools/RTC.COM $(OUT)/rtcwork
+	$(OUT)/dos-test dos/tools/MOUSE.COM $(OUT)/mousework
 	mkdir -p $(OUT)/mpu && printf '\272\061\003\354\074\377\165\005\270\023\000\315\020\353\376' > $(OUT)/mpu/MPU.COM
 	$(OUT)/dos-test $(OUT)/mpu/MPU.COM $(OUT)/mpuwork
 

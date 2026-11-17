@@ -176,7 +176,6 @@ static void input_poll(void) {
 }
 
 static int16_t input_state(unsigned port, unsigned device, unsigned index, unsigned id) {
-    (void)index;
     if (port != 0) return 0;
     switch (device) {
     case RETRO_DEVICE_KEYBOARD:
@@ -185,7 +184,9 @@ static int16_t input_state(unsigned port, unsigned device, unsigned index, unsig
         switch (id) {
         case RETRO_DEVICE_ID_POINTER_X: return (int16_t)pointer_x;
         case RETRO_DEVICE_ID_POINTER_Y: return (int16_t)pointer_y;
-        case RETRO_DEVICE_ID_POINTER_PRESSED: return (int16_t)pointer_pressed;
+        /* index = which finger: the core counts fingers by asking for pressed 1, 2… (before,
+         * every index answered "pressed", so one finger looked like three: no moving, odd clicks) */
+        case RETRO_DEVICE_ID_POINTER_PRESSED: return (int16_t)(pointer_pressed && (int)index < pointer_count);
         case RETRO_DEVICE_ID_POINTER_COUNT: return (int16_t)pointer_count;
         default: return 0;
         }

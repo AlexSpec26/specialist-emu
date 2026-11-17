@@ -665,7 +665,7 @@ final class GameView extends View {
     private void lookUp(int id, float x, float y) {
         boolean last = looking.size() == 1 && looking.get(id) != null;
         looking.remove(id);
-        if (!last || lookMoved || System.currentTimeMillis() - lookDownAt > 350) return;
+        if (!last || lookMoved || System.currentTimeMillis() - lookDownAt > 600) return;
         // a tap
         long now = System.currentTimeMillis();
         if (tapPauses) {
@@ -767,9 +767,10 @@ final class GameView extends View {
                         updatePad(0, 0, true);
                     }
                     else if (t == T_SCREEN) {
+                        // the mouse is told how many fingers are left each time one comes off:
+                        // 2 → 1 → 0 is a right click, 1 → 0 a left one
+                        fingers.remove(id);
                         if (id == screenFinger) {
-                            sendPointer(ev.getX(i), ev.getY(i), screenFingers() > 1);
-                            fingers.remove(id);
                             screenFinger = -1;
                             for (int j = 0; j < fingers.size(); j++) {
                                 if (fingers.valueAt(j) == T_SCREEN) {
@@ -777,9 +778,11 @@ final class GameView extends View {
                                     break;
                                 }
                             }
-                            if (screenFinger < 0) host.onPointer(0, 0, false, 0);
-                            continue;
                         }
+                        int j = screenFinger >= 0 ? ev.findPointerIndex(screenFinger) : -1;
+                        if (j >= 0) sendPointer(ev.getX(j), ev.getY(j), true);
+                        else host.onPointer(0, 0, false, 0);
+                        continue;
                     }
                     fingers.remove(id);
                 }
