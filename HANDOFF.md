@@ -3,7 +3,7 @@
 - Outgoing agent: Claude «Синклер» (Claude Code, облачная сессия; отвечает только за ZX — `zx/`)
 - Branch: `claude/zx-standard`
 - Last pushed commit: см. `git log -1 origin/claude/zx-standard`
-- Open PR: #26 (ZX-016)
+- Open PR: нет; PR #26 влит (9e2658d), релиз **zx-build-17** (`zx-spectrum-17.apk`, CI зелёный)
 - Active backlog IDs: ZX-016 (Review)
 - User-approved goal for this session: «В этой ветке мы сфокусируемся на эмуляторе ZX Spectrum … остальные
   ветки рассматриваем только для заимствования элементов интерфейса». Задача: «привести к общему стандарту —
@@ -34,7 +34,7 @@
 - Раскладка на телефоне не проверена: ⟲ на панели рядом с ☰, кнопки шагов на паузе сузились (между ⟲ и ⌨).
 
 ## Exact next steps (ordered)
-1. Зелёный CI на PR #26 → влить → релиз zx-build-N.
+1. Сделано: PR #26 влит, релиз zx-build-17.
 2. Владелец: ⟲ 5 с при ×1, ×4 и замедлении; сохранить → выйти → загрузить → ⟲; экран (цветной ТВ, лупа); джойстик.
 3. По отзывам — правки ZX-016.
 
