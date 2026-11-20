@@ -37,6 +37,9 @@ final class MainView extends View {
 
         /** pause controls: 0 = 1 s back, 1 = one instruction back, 2 = one forward, 3 = 1 s forward */
         void onStep(int kind);
+
+        /** ⟲ 5 s: back 5 seconds of the time the player lived through (any speed) */
+        void onRewind();
     }
 
     private static final int T_NONE = -1;
@@ -47,6 +50,7 @@ final class MainView extends View {
     private static final int T_SCREEN = -6;
     private static final int T_MAP = -7;
     private static final int T_PANEL = -8;
+    private static final int T_REWIND = -9;
     private static final int T_STEP = 3000;
     private static final int T_BUTTON = 1000;
     private static final int T_KEY = 2000;
@@ -66,8 +70,26 @@ final class MainView extends View {
     String title = "";
     /** Shown as an overlay; the emulation itself is paused by the activity. */
     boolean paused;
-    /** speed shown over the screen (null at real speed) */
+    /** speed shown in the panel, off the picture (null at real speed) */
     String speedBadge;
+    /** a short note in the panel (how far ⟲ went), until noteUntil (ms) */
+    private String note;
+    private long noteUntil;
+
+    void setPaused(boolean p) {
+        if (paused == p) return;
+        paused = p;
+        if (!p) resetZoom();
+        invalidate();
+    }
+
+    /** a note in the panel for 2 seconds (off the picture) */
+    void showNote(String n) {
+        note = n;
+        noteUntil = System.currentTimeMillis() + 2000;
+        invalidate();
+        postInvalidateDelayed(2050);
+    }
     /** live memory map under the screen (portrait only) */
     boolean mapOn;
     /** live tape input (microphone), for the level indicator; null when off */
@@ -86,6 +108,10 @@ final class MainView extends View {
     /** called when the tutorial is closed (so the owner can re-layout) */
     Runnable onTutorialClosed;
     private final RectF menuRect = new RectF();
+    /** ⟲ 5 s, always there (as in DOS 286) */
+    private final RectF rewindRect = new RectF();
+    /** where the speed / tape indicator goes, off the picture */
+    private final RectF statusRect = new RectF();
     private final RectF[] stepRects = {new RectF(), new RectF(), new RectF(), new RectF()};
     private static final String[] STEP_LABELS = {"⏪ 1 с", "◀ 1", "1 ▶", "1 с ⏩"};
     /** beam and current instruction are shown until this time (ms) */
@@ -101,10 +127,20 @@ final class MainView extends View {
     private final RectF joyZone = new RectF();
     private final RectF btnZone = new RectF();
     private float toolbarY = -1, toolbarH;
-    private float joyCx, joyCy, joyR;
+    /** the stick: at rest its ring stands at joyRestX/Y; a touch in its zone puts the centre
+     *  (joyCx/Cy) under the finger, as in DOS 286 and the Specialist (Dysmantle-style) */
+    private float joyCx, joyCy, joyR, joyRestX, joyRestY;
     private final float[] btnX = new float[ControlConfig.MAX_BUTTONS];
     private final float[] btnY = new float[ControlConfig.MAX_BUTTONS];
-    private float btnR;
+    private final float[] btnRs = new float[ControlConfig.MAX_BUTTONS];
+    /** where a finger counts as on button i: its whole cell of the grid */
+    private final RectF[] btnCells = new RectF[ControlConfig.MAX_BUTTONS];
+    /** the picture through the phone's video chip (screen modes, magnifier); null = drawn here */
+    ScreenRenderer screenRenderer;
+    Runnable requestRender;
+    /** the pause magnifier: 1…MAX_ZOOM and the picture point (0..1) in the middle */
+    private static final float MAX_ZOOM = 24f;
+    private float zoom = 1, zoomCx = 0.5f, zoomCy = 0.5f;
     private boolean landscape;
     private float insL, insT, insR, insB;
 
@@ -155,6 +191,7 @@ final class MainView extends View {
         text.setColor(Color.WHITE);
         setHapticFeedbackEnabled(true);
         java.util.Arrays.fill(btnCode, ZxKeys.NONE);
+        for (int i = 0; i < btnCells.length; i++) btnCells[i] = new RectF();
         buildKeyboard();
         map = new MapPanel(emu, new MapPanel.Host() {
             @Override
@@ -242,7 +279,12 @@ final class MainView extends View {
     /** Releases every key held by on-screen controls. */
     void releaseAll() {
         pointers.clear();
+        looking.clear();
         joyPointer = -1;
+        joyCx = joyRestX;
+        joyCy = joyRestY;
+        knobX = joyCx;
+        knobY = joyCy;
         setJoyDirs(0);
         for (int i = 0; i < ControlConfig.MAX_BUTTONS; i++) releaseButton(i);
         for (int c = 0; c < ZxKeys.COUNT; c++) {
@@ -329,6 +371,8 @@ final class MainView extends View {
             toolbarY = oy + sh;
             menuRect.set(ox + 8 * dp, toolbarY + (tb - small) / 2, ox + 8 * dp + small * 1.4f, toolbarY + (tb + small) / 2);
             kbdBtnRect.set(ox + w - 8 * dp - small * 1.4f, menuRect.top, ox + w - 8 * dp, menuRect.bottom);
+            rewindRect.set(menuRect.right + 6 * dp, menuRect.top, menuRect.right + 6 * dp + small * 1.5f, menuRect.bottom);
+            statusRect.set(kbdBtnRect.left - 6 * dp - 64 * dp, menuRect.top, kbdBtnRect.left - 6 * dp, menuRect.bottom);
             float top = toolbarY + tb;
             float bottom = oy + h;
             float regionH = bottom - top;
@@ -350,13 +394,14 @@ final class MainView extends View {
                 joyCx = ox + w * 0.25f;
                 joyCy = cy;
                 joyR = r;
-                layoutButtons(ox + w * 0.75f, cy, r);
+                float at = Math.min(cy - r * 1.2f, bottom - r * 2.4f);
+                layoutButtons(new RectF(ox + w / 2f + 8 * dp, at, ox + w - 8 * dp, bottom - 8 * dp), fullW / 4f);
             } else {
                 float cy = top + regionH * 0.5f;
-                joyCx = ox + w * 0.27f;
+                joyCx = ox + w * 0.25f;
                 joyCy = cy;
-                joyR = Math.min(w * 0.21f, regionH * 0.32f);
-                layoutButtons(ox + w * 0.73f, cy, Math.min(w * 0.2f, regionH * 0.3f));
+                joyR = Math.min(w * 0.18f, regionH * 0.3f);
+                layoutButtons(new RectF(ox + w / 2f + 8 * dp, top + 8 * dp, ox + w - 8 * dp, bottom - 8 * dp), fullW / 4f);
             }
             // low keys (roughly square), so the memory map stays visible above the keyboard
             float rowH = Math.min(regionH / rows.size(), (mapVisible ? 42 : 58) * dp);
@@ -373,34 +418,66 @@ final class MainView extends View {
             mapVisible = false;
             menuRect.set(ox + 6 * dp, oy + 6 * dp, ox + 6 * dp + small * 1.4f, oy + 6 * dp + small);
             kbdBtnRect.set(ox + w - 6 * dp - small * 1.4f, oy + 6 * dp, ox + w - 6 * dp, oy + 6 * dp + small);
-            joyZone.set(0, menuRect.bottom + 8 * dp, sx, fullH);
-            btnZone.set(sx + sw, menuRect.bottom + 8 * dp, fullW, fullH);
+            // ⟲ under ☰; the speed / tape indicator under ⌨ — beside the picture, not on it
+            rewindRect.set(menuRect.left, menuRect.bottom + 6 * dp, Math.max(menuRect.right, sx - 6 * dp), menuRect.bottom + 6 * dp + small);
+            statusRect.set(Math.min(kbdBtnRect.left, sx + sw + 6 * dp), kbdBtnRect.bottom + 6 * dp, kbdBtnRect.right, kbdBtnRect.bottom + 6 * dp + 26 * dp);
+            joyZone.set(0, rewindRect.bottom + 8 * dp, sx, fullH);
+            btnZone.set(sx + sw, statusRect.bottom + 8 * dp, fullW, fullH);
             float side = sx - ox;
             joyCx = ox + side / 2f;
-            joyCy = oy + h * 0.62f;
-            joyR = Math.min(side * 0.42f, h * 0.26f);
-            layoutButtons(ox + w - side / 2f, oy + h * 0.62f, Math.min(side * 0.42f, h * 0.26f));
+            joyCy = oy + h * 0.66f;
+            joyR = Math.min(side * 0.4f, h * 0.24f);
+            layoutButtons(new RectF(sx + sw + 8 * dp, statusRect.bottom + 12 * dp, ox + w - 8 * dp, oy + h - 8 * dp), fullW / 4f);
             float kh = Math.min(h * 0.62f, rows.size() * 62 * dp);
             kbdRect.set(ox, oy + h - kh, ox + w, oy + h);
         }
+        joyRestX = joyCx;
+        joyRestY = joyCy;
         knobX = joyCx;
         knobY = joyCy;
         layoutKeys();
+        if (screenRenderer != null) {
+            screenRenderer.setRect(screenRect.left, screenRect.top, screenRect.width(), screenRect.height());
+            if (requestRender != null) requestRender.run();
+        }
     }
 
-    private void layoutButtons(float cx, float cy, float r) {
+    /**
+     * The buttons as in DOS 286 and the Specialist: as large as the area allows (the more of them,
+     * the smaller), no wider than maxD; the grid with the most room per button wins, rows filled
+     * left to right, top to bottom, the grid in the middle of the area. A finger counts on its
+     * whole cell.
+     */
+    private void layoutButtons(RectF area, float maxD) {
         int n = Math.max(1, Math.min(buttonCount, ControlConfig.MAX_BUTTONS));
-        float[][] pos;
-        switch (n) {
-            case 1: pos = new float[][]{{0, 0}}; break;
-            case 2: pos = new float[][]{{-0.55f, 0.3f}, {0.55f, -0.3f}}; break;
-            case 3: pos = new float[][]{{-0.75f, 0.45f}, {0f, -0.05f}, {0.75f, -0.55f}}; break;
-            default: pos = new float[][]{{-0.75f, 0f}, {0f, 0.75f}, {0.75f, 0f}, {0f, -0.75f}}; break;
+        float g = 12 * dp;
+        int bestCols = 1;
+        float best = 0;
+        for (int cols = 1; cols <= n; cols++) {
+            int rows = (n + cols - 1) / cols;
+            float sz = Math.min((area.width() - g * (cols - 1)) / cols, (area.height() - g * (rows - 1)) / rows);
+            if (sz > best + 0.5f) {
+                best = sz;
+                bestCols = cols;
+            }
         }
-        btnR = r * (n >= 3 ? 0.4f : 0.5f);
+        int cols = bestCols, rows = (n + cols - 1) / cols;
+        float d = Math.max(16 * dp, Math.min(best, maxD));
+        float gx = cols > 1 ? Math.min((area.width() - cols * d) / (cols - 1), d * 0.3f) : 0;
+        float gy = rows > 1 ? Math.min((area.height() - rows * d) / (rows - 1), d * 0.3f) : 0;
+        gx = Math.max(gx, g * 0.5f);
+        gy = Math.max(gy, g * 0.5f);
+        float gridH = rows * d + (rows - 1) * gy;
+        float y0 = area.centerY() - gridH / 2;
         for (int i = 0; i < n; i++) {
-            btnX[i] = cx + pos[i][0] * r;
-            btnY[i] = cy + pos[i][1] * r;
+            int r = i / cols, c = i % cols;
+            int inRow = Math.min(cols, n - r * cols);
+            float rowW = inRow * d + (inRow - 1) * gx;
+            float x0 = area.centerX() - rowW / 2;
+            btnX[i] = x0 + c * (d + gx) + d / 2;
+            btnY[i] = y0 + r * (d + gy) + d / 2;
+            btnRs[i] = d / 2;
+            btnCells[i].set(btnX[i] - (d + gx) / 2, btnY[i] - (d + gy) / 2, btnX[i] + (d + gx) / 2, btnY[i] + (d + gy) / 2);
         }
     }
 
@@ -433,45 +510,42 @@ final class MainView extends View {
 
     @Override
     protected void onDraw(Canvas c) {
-        c.drawColor(Color.BLACK);
-        synchronized (emu.frame) {
-            System.arraycopy(emu.frame, 0, pixels, 0, pixels.length);
+        if (screenRenderer != null && !screenRenderer.failed) {
+            // the picture's place stays transparent: the screen renderer's surface is under it
+            c.save();
+            if (android.os.Build.VERSION.SDK_INT >= 26) c.clipOutRect(screenRect);
+            else c.clipRect(screenRect, android.graphics.Region.Op.DIFFERENCE);
+            c.drawColor(Color.BLACK);
+            c.restore();
+        } else {
+            c.drawColor(Color.BLACK);
+            synchronized (emu.frame) {
+                System.arraycopy(emu.frame, 0, pixels, 0, pixels.length);
+            }
+            screenBmp.setPixels(pixels, 0, Spectrum48.WIDTH, 0, 0, Spectrum48.WIDTH, Spectrum48.HEIGHT);
+            c.drawBitmap(screenBmp, srcRect, screenRect, bmpPaint);
         }
-        screenBmp.setPixels(pixels, 0, Spectrum48.WIDTH, 0, 0, Spectrum48.WIDTH, Spectrum48.HEIGHT);
-        c.drawBitmap(screenBmp, srcRect, screenRect, bmpPaint);
-        // The picture stays clean on pause: the step buttons appear around it (toolbar / sides)
-        // instead of a dark veil, and the registers only after a step (owner's request, UX-001).
-        if (paused && pickPrompt == null) drawPauseSign(c);
-        if (tape != null) drawTapeIndicator(c);
-        else drawCassette(c);
-        if (speedBadge != null) {
-            String sp = speedBadge;
-            text.setTextSize(13 * dp);
-            float tw = text.measureText(sp) + 12 * dp;
-            fill.setColor(0xCC3A5BD9);
-            RectF b = new RectF(screenRect.right - tw - 6 * dp, screenRect.top + 6 * dp,
-                    screenRect.right - 6 * dp, screenRect.top + 26 * dp);
-            c.drawRoundRect(b, 8 * dp, 8 * dp, fill);
-            text.setColor(Color.WHITE);
-            c.drawText(sp, b.centerX(), b.centerY() + 5 * dp, text);
-        }
-
+        // On the picture only the small pause sign (owner: nothing over the picture, UX-001, ZX-016);
+        // speed, tape, the beam and the registers are beside it.
+        if (paused && pickPrompt == null && zoom <= 1.01f) drawPauseSign(c);
 
         if (toolbarY >= 0) {
             fill.setColor(0xFF15151A);
             c.drawRect(0, toolbarY, getWidth(), toolbarY + toolbarH, fill);
-            if (title != null && !title.isEmpty() && !(paused && pickPrompt == null)) {
+            if (title != null && !title.isEmpty() && !(paused && pickPrompt == null) && !statusActive()) {
                 text.setTextSize(15 * dp);
                 text.setColor(0xFF9A9AA5);
                 String t = title;
-                float maxW = kbdBtnRect.left - menuRect.right - 16 * dp;
+                float maxW = statusRect.left - rewindRect.right - 16 * dp;
                 while (t.length() > 3 && text.measureText(t) > maxW) t = t.substring(0, t.length() - 2);
                 if (!t.equals(title)) t = t + "…";
-                c.drawText(t, getWidth() / 2f, toolbarY + toolbarH / 2 + 5 * dp, text);
+                c.drawText(t, (rewindRect.right + statusRect.left) / 2f, toolbarY + toolbarH / 2 + 5 * dp, text);
             }
         }
         drawUiButton(c, menuRect, "☰", false);
         drawUiButton(c, kbdBtnRect, "⌨", keyboardVisible);
+        drawUiButton(c, rewindRect, "⟲ 5 с", false);
+        drawStatus(c);
 
         if (mapVisible) {
             map.programTitle = title;
@@ -499,13 +573,60 @@ final class MainView extends View {
         fill.setColor(active ? 0xCC3A5BD9 : 0x99303038);
         c.drawRoundRect(r, 10 * dp, 10 * dp, fill);
         text.setColor(Color.WHITE);
-        text.setTextSize(r.height() * 0.5f);
-        c.drawText(label, r.centerX(), r.centerY() + r.height() * 0.18f, text);
+        float ts = r.height() * 0.5f;
+        text.setTextSize(ts);
+        float tw = text.measureText(label);
+        if (tw > r.width() * 0.86f) text.setTextSize(ts * r.width() * 0.86f / tw);
+        c.drawText(label, r.centerX(), r.centerY() + text.getTextSize() * 0.36f, text);
     }
 
     /** cassette indicator: input level bar and a "signal" lamp */
-    private void drawTapeIndicator(Canvas c) {
-        float x = screenRect.left + 6 * dp, y = screenRect.top + 6 * dp;
+    /**
+     * Speed, tape and notes beside the picture (in the panel; in landscape under ⌨): the note of
+     * the last ⟲ for 2 s, else the microphone level or the tape file's progress, and the speed.
+     */
+    private boolean statusActive() {
+        Tape t = machine.tape;
+        return (note != null && System.currentTimeMillis() < noteUntil) || tape != null || speedBadge != null
+                || (t != null && (t.playing || emu.turboActive));
+    }
+
+    private void drawStatus(Canvas c) {
+        float x = statusRect.left, y = statusRect.top + (statusRect.height() - 20 * dp) / 2f;
+        float maxW = statusRect.width();
+        if (toolbarY >= 0) {
+            // portrait: the indicator grows to the left over the title's place
+            x = statusRect.right;
+            maxW = statusRect.right - rewindRect.right - 8 * dp;
+        }
+        String label = null;
+        int bg = 0xCC101018;
+        if (note != null && System.currentTimeMillis() < noteUntil) {
+            label = note;
+            bg = 0xCC2A3A80;
+        } else if (tape != null) {
+            drawTapeIndicator(c, toolbarY >= 0 ? x - 74 * dp : x, y);
+            return;
+        } else {
+            Tape t = machine.tape;
+            if (t != null && (t.playing || emu.turboActive)) {
+                label = "📼 " + (emu.turboActive ? "⏩ " : "▶ ") + Math.round(t.progress() * 100) + "%";
+                postInvalidateDelayed(250);
+            }
+            if (speedBadge != null) label = label == null ? speedBadge : speedBadge + "  " + label;
+        }
+        if (label == null) return;
+        if (paused && pickPrompt == null && toolbarY >= 0) return; // the step buttons have the room
+        text.setTextSize(12 * dp);
+        float tw = Math.min(maxW, text.measureText(label) + 12 * dp);
+        float l = toolbarY >= 0 ? x - tw : x;
+        fill.setColor(bg);
+        c.drawRoundRect(l, y, l + tw, y + 20 * dp, 6 * dp, 6 * dp, fill);
+        text.setColor(Color.WHITE);
+        c.drawText(label, l + tw / 2, y + 15 * dp, text);
+    }
+
+    private void drawTapeIndicator(Canvas c, float x, float y) {
         float w = 74 * dp, h = 20 * dp;
         fill.setColor(0xCC101018);
         c.drawRoundRect(x, y, x + w, y + h, 6 * dp, 6 * dp, fill);
@@ -528,23 +649,6 @@ final class MainView extends View {
         c.drawCircle(x + w - 8 * dp, y + h / 2f, 4 * dp, fill);
     }
 
-    /** tape file in the recorder: progress and play state; "⏩" while loading fast */
-    private void drawCassette(Canvas c) {
-        Tape t = machine.tape;
-        if (t == null || (!t.playing && !emu.turboActive)) return;
-        String s = (emu.turboActive ? "⏩ " : "▶ ") + Math.round(t.progress() * 100) + "%";
-        text.setTextSize(12 * dp);
-        float w = text.measureText(s) + 30 * dp, h = 20 * dp;
-        float x = screenRect.left + 6 * dp, y = screenRect.top + 6 * dp;
-        fill.setColor(0xCC101018);
-        c.drawRoundRect(x, y, x + w, y + h, 6 * dp, 6 * dp, fill);
-        text.setTextAlign(Paint.Align.LEFT);
-        text.setColor(Color.WHITE);
-        c.drawText("📼 " + s, x + 5 * dp, y + 15 * dp, text);
-        text.setTextAlign(Paint.Align.CENTER);
-        postInvalidateDelayed(250);
-    }
-
     /**
      * Step buttons outside the picture: portrait — in the toolbar instead of the title;
      * landscape — two on each side of the picture, under ☰ and ⌨.
@@ -552,7 +656,7 @@ final class MainView extends View {
     private void layoutStepButtons() {
         float gap = 6 * dp;
         if (toolbarY >= 0) {
-            float left = menuRect.right + gap, right = kbdBtnRect.left - gap;
+            float left = rewindRect.right + gap, right = kbdBtnRect.left - gap;
             float w = (right - left - gap * 3) / 4f;
             for (int i = 0; i < 4; i++) {
                 float x = left + i * (w + gap);
@@ -561,9 +665,10 @@ final class MainView extends View {
         } else {
             float h = 44 * dp;
             for (int i = 0; i < 2; i++) {
-                float y = menuRect.bottom + gap + i * (h + gap);
+                float y = rewindRect.bottom + gap + i * (h + gap);
                 stepRects[i].set(menuRect.left, y, screenRect.left - gap, y + h);
-                stepRects[i + 2].set(screenRect.right + gap, y, kbdBtnRect.right, y + h);
+                float yr = statusRect.bottom + gap + i * (h + gap);
+                stepRects[i + 2].set(screenRect.right + gap, yr, kbdBtnRect.right, yr + h);
             }
         }
     }
@@ -583,19 +688,37 @@ final class MainView extends View {
         }
     }
 
-    /** beam position (crosshair) and the instruction at PC with the registers */
+    /**
+     * The instruction at PC with the registers, and where the beam is — all beside the picture:
+     * the red crosshair over it is gone (owner, ZX-016); small marks on the edges point at the
+     * beam (portrait: its column on the panel's top edge; landscape: its line on both sides).
+     */
     private void drawMachineInfo(Canvas c) {
         com.alexspec.zx.core.Z80 z = machine.cpu;
         int[] b = machine.beam();
         float sx = screenRect.width() / Spectrum48.WIDTH, sy = screenRect.height() / Spectrum48.HEIGHT;
-        if (b != null) {
+        if (b != null && zoom <= 1.01f) {
             float x = screenRect.left + (b[0] + 0.5f) * sx, y = screenRect.top + (b[1] + 0.5f) * sy;
-            stroke.setStrokeWidth(1.5f * dp);
-            stroke.setColor(0xCCFF3030);
-            c.drawLine(screenRect.left, y, screenRect.right, y, stroke);
-            c.drawLine(x, screenRect.top, x, screenRect.bottom, stroke);
-            fill.setColor(0xFFFFFF40);
-            c.drawCircle(x, y, 3.5f * dp, fill);
+            float m = 7 * dp;
+            fill.setColor(0xEEFF4040);
+            android.graphics.Path p = new android.graphics.Path();
+            if (toolbarY >= 0) {
+                float e = screenRect.bottom;
+                p.moveTo(x, e);
+                p.lineTo(x - m * 0.7f, e + m);
+                p.lineTo(x + m * 0.7f, e + m);
+            } else {
+                float l = screenRect.left, r = screenRect.right;
+                p.moveTo(l, y);
+                p.lineTo(l - m, y - m * 0.7f);
+                p.lineTo(l - m, y + m * 0.7f);
+                p.close();
+                p.moveTo(r, y);
+                p.lineTo(r + m, y - m * 0.7f);
+                p.lineTo(r + m, y + m * 0.7f);
+            }
+            p.close();
+            c.drawPath(p, fill);
         }
         int[] len = new int[1];
         String ins = com.alexspec.zx.core.Z80Dis.dis(machine, z.pc, len);
@@ -610,16 +733,26 @@ final class MainView extends View {
         String l2 = String.format(java.util.Locale.US, "AF %04X BC %04X DE %04X HL %04X", z.af(), z.bc(), z.de(), z.hl());
         String l3 = String.format(java.util.Locale.US, "IX %04X IY %04X SP %04X IM%d %s", z.ix, z.iy, z.sp, z.im, z.iff1 ? "EI" : "DI");
         String l4 = String.format(java.util.Locale.US, "кадр %d, такт %d (строка %d, %d)", machine.frames(), t, line, t % Spectrum48.T_LINE);
+        if (b != null) l4 += String.format(java.util.Locale.US, ", луч %d:%d", b[0], b[1]);
         String[] lines = l0.isEmpty() ? new String[]{l1, l2, l3, l4} : new String[]{l0, l1, l2, l3, l4};
         android.graphics.Typeface old = text.getTypeface();
         text.setTypeface(android.graphics.Typeface.MONOSPACE);
         text.setTextAlign(Paint.Align.LEFT);
+        float pad = 5 * dp;
+        // portrait: under the toolbar; landscape: on the left of the picture, under the step buttons
+        float room = toolbarY >= 0 ? screenRect.width() - 12 * dp : screenRect.left - insL - 4 * dp - 2 * pad;
         float ts = Math.min(13 * dp, screenRect.width() / 30f);
         text.setTextSize(ts);
-        float lh = ts * 1.25f, pad = 5 * dp, maxW = 0;
+        float maxW = 0;
         for (String l : lines) maxW = Math.max(maxW, text.measureText(l));
-        // portrait: under the toolbar, off the picture; landscape: no room outside, top-left corner
-        float bx = screenRect.left + 6 * dp, by = toolbarY >= 0 ? toolbarY + toolbarH + 6 * dp : screenRect.top + 6 * dp;
+        if (maxW > room && maxW > 0) {
+            ts *= room / maxW;
+            text.setTextSize(ts);
+            maxW = room;
+        }
+        float lh = ts * 1.25f;
+        float bx = toolbarY >= 0 ? screenRect.left + 6 * dp : insL + 2 * dp;
+        float by = toolbarY >= 0 ? toolbarY + toolbarH + 6 * dp : stepRects[1].bottom + 8 * dp;
         fill.setColor(0xD0101018);
         c.drawRoundRect(bx, by, bx + maxW + 2 * pad, by + lh * lines.length + pad, 6 * dp, 6 * dp, fill);
         for (int i = 0; i < lines.length; i++) {
@@ -639,10 +772,11 @@ final class MainView extends View {
     }
 
     private void drawControls(Canvas c) {
-        // joystick
-        fill.setColor(ca(0x33FFFFFF));
+        // joystick: a faint ring at rest, a clear one where the finger came down
+        boolean on = joyPointer >= 0;
+        fill.setColor(ca(on ? 0x33FFFFFF : 0x1AFFFFFF));
         c.drawCircle(joyCx, joyCy, joyR, fill);
-        stroke.setColor(ca(0x66FFFFFF));
+        stroke.setColor(ca(on ? 0x66FFFFFF : 0x33FFFFFF));
         stroke.setStrokeWidth(2 * dp);
         c.drawCircle(joyCx, joyCy, joyR, stroke);
         text.setTextSize(joyR * 0.28f);
@@ -656,6 +790,7 @@ final class MainView extends View {
         // buttons
         int n = Math.min(buttonCount, ControlConfig.MAX_BUTTONS);
         for (int i = 0; i < n; i++) {
+            float btnR = btnRs[i];
             boolean down = btnDown[i] > 0;
             fill.setColor(ca(down ? 0xEE5A7DFF : 0x66FFFFFF));
             c.drawCircle(btnX[i], btnY[i], btnR, fill);
@@ -663,7 +798,7 @@ final class MainView extends View {
             c.drawCircle(btnX[i], btnY[i], btnR, stroke);
             String label = shortLabel(config.keys[ControlConfig.BUTTON0 + i]);
             text.setColor(ca(0xFFFFFFFF));
-            float ts = btnR * 0.62f;
+            float ts = Math.min(btnR * 0.62f, 28 * dp);
             text.setTextSize(ts);
             float tw = text.measureText(label);
             if (tw > btnR * 1.6f) text.setTextSize(ts * btnR * 1.6f / tw);
@@ -750,6 +885,7 @@ final class MainView extends View {
     private int hitTest(float x, float y) {
         if (inflate(menuRect, 8 * dp).contains(x, y)) return T_MENU;
         if (inflate(kbdBtnRect, 8 * dp).contains(x, y)) return T_KBD;
+        if (inflate(rewindRect, 4 * dp).contains(x, y)) return T_REWIND;
         if (paused && pickPrompt == null) {
             layoutStepButtons();
             for (int i = 0; i < 4; i++) if (stepRects[i].contains(x, y)) return T_STEP + i;
@@ -783,7 +919,7 @@ final class MainView extends View {
             // over the map only the controls themselves react, everything else inspects memory
             int bb = hitButton(x, y, 1.0f);
             if (bb >= 0) return T_BUTTON + bb;
-            float dx = x - joyCx, dy = y - joyCy;
+            float dx = x - joyRestX, dy = y - joyRestY;
             if (dx * dx + dy * dy <= joyR * joyR * 1.3f) return T_JOY;
             return T_MAP;
         }
@@ -795,20 +931,9 @@ final class MainView extends View {
     }
 
     private int hitButton(float x, float y, float slack) {
-        if (!btnZone.contains(x, y)) return -1;
         int n = Math.min(buttonCount, ControlConfig.MAX_BUTTONS);
-        int best = -1;
-        float bestD = Float.MAX_VALUE;
-        for (int i = 0; i < n; i++) {
-            float dx = x - btnX[i], dy = y - btnY[i];
-            float d = dx * dx + dy * dy;
-            if (d < bestD) {
-                bestD = d;
-                best = i;
-            }
-        }
-        float lim = btnR * slack;
-        return (best >= 0 && bestD <= lim * lim) ? best : -1;
+        for (int i = 0; i < n; i++) if (btnCells[i].contains(x, y)) return i;
+        return -1;
     }
 
     private static RectF inflate(RectF r, float d) {
@@ -834,7 +959,9 @@ final class MainView extends View {
                     int id = ev.getPointerId(i);
                     int t = pointers.get(id, T_NONE);
                     float x = ev.getX(i), y = ev.getY(i);
-                    if (t == T_MAP) {
+                    if (t == T_SCREEN) {
+                        lookMove(id, x, y);
+                    } else if (t == T_MAP) {
                         map.move(id, x, y);
                     } else if (t == T_PANEL) {
                         map.panelMove(id, x, y);
@@ -882,7 +1009,11 @@ final class MainView extends View {
             showMachineInfo();
             return;
         }
-        if (t == T_MENU || t == T_KBD || t == T_SCREEN) {
+        if (t == T_SCREEN) {
+            lookDown(id, x, y);
+            return;
+        }
+        if (t == T_MENU || t == T_KBD || t == T_REWIND) {
             haptic();
             return;
         }
@@ -900,6 +1031,8 @@ final class MainView extends View {
                 return;
             }
             joyPointer = id;
+            joyCx = x; // the centre where the finger came down
+            joyCy = y;
             updateJoy(x, y);
             return;
         }
@@ -950,7 +1083,15 @@ final class MainView extends View {
             return;
         }
         if (t == T_SCREEN) {
-            if (pickPrompt == null) host.onScreenTapped();
+            // a tap pauses / goes on; a drag or a pinch was the magnifier
+            if (lookUp(id) && pickPrompt == null) {
+                haptic();
+                host.onScreenTapped();
+            }
+            return;
+        }
+        if (t == T_REWIND) {
+            host.onRewind();
             return;
         }
         if (t == T_MENU) {
@@ -968,6 +1109,8 @@ final class MainView extends View {
         }
         if (t == T_JOY && id == joyPointer) {
             joyPointer = -1;
+            joyCx = joyRestX;
+            joyCy = joyRestY;
             knobX = joyCx;
             knobY = joyCy;
             setJoyDirs(0);
@@ -1025,6 +1168,14 @@ final class MainView extends View {
     private void updateJoy(float x, float y) {
         float dx = x - joyCx, dy = y - joyCy;
         float dist = (float) Math.sqrt(dx * dx + dy * dy);
+        if (dist > joyR) {
+            // the finger went past the ring: the centre follows it (turning needs no return)
+            joyCx = x - dx * joyR / dist;
+            joyCy = y - dy * joyR / dist;
+            dx = x - joyCx;
+            dy = y - joyCy;
+            dist = joyR;
+        }
         float lim = joyR * 0.62f;
         if (dist > lim) {
             knobX = joyCx + dx / dist * lim;
@@ -1079,6 +1230,83 @@ final class MainView extends View {
         }
         if (pressed && joyDirs == 0) haptic();
         joyDirs = dirs;
+    }
+
+    // ------------------------------------------------------------------ the magnifier (pause)
+
+    private final android.util.SparseArray<float[]> looking = new android.util.SparseArray<>();
+    private long lookDownAt;
+    private float lookDownX, lookDownY;
+    private boolean lookMoved;
+
+    private void lookDown(int id, float x, float y) {
+        looking.put(id, new float[]{x, y});
+        if (looking.size() == 1) {
+            lookDownAt = System.currentTimeMillis();
+            lookDownX = x;
+            lookDownY = y;
+            lookMoved = false;
+        } else {
+            lookMoved = true; // two fingers: a pinch, not a tap
+        }
+    }
+
+    /** on the paused picture: one finger drags the enlarged picture, two fingers zoom (to ×24) */
+    private void lookMove(int id, float x, float y) {
+        float[] p = looking.get(id);
+        if (p == null) return;
+        if (Math.hypot(x - lookDownX, y - lookDownY) > 12 * dp) lookMoved = true;
+        boolean canZoom = paused && screenRenderer != null && !screenRenderer.failed && screenRect.width() > 0;
+        if (canZoom && looking.size() == 1) {
+            zoomCx -= (x - p[0]) / (screenRect.width() * zoom);
+            zoomCy -= (y - p[1]) / (screenRect.height() * zoom);
+            applyZoom();
+        } else if (canZoom && looking.size() >= 2 && (looking.keyAt(0) == id || looking.keyAt(1) == id)) {
+            float[] a = looking.valueAt(0), b = looking.valueAt(1);
+            float ax = a[0], ay = a[1], bx = b[0], by = b[1];
+            float before = (float) Math.hypot(ax - bx, ay - by);
+            if (looking.keyAt(0) == id) { ax = x; ay = y; } else { bx = x; by = y; }
+            float after = (float) Math.hypot(ax - bx, ay - by);
+            if (before > 10 * dp && after > 10 * dp) {
+                float fx = (ax + bx) / 2, fy = (ay + by) / 2;
+                float u = zoomCx + (fx - screenRect.centerX()) / (screenRect.width() * zoom);
+                float v = zoomCy + (fy - screenRect.centerY()) / (screenRect.height() * zoom);
+                zoom = Math.max(1f, Math.min(MAX_ZOOM, zoom * after / before));
+                zoomCx = u - (fx - screenRect.centerX()) / (screenRect.width() * zoom);
+                zoomCy = v - (fy - screenRect.centerY()) / (screenRect.height() * zoom);
+                applyZoom();
+            }
+        }
+        p[0] = x;
+        p[1] = y;
+    }
+
+    /** a finger left the picture; true if that was a tap */
+    private boolean lookUp(int id) {
+        boolean last = looking.size() == 1 && looking.get(id) != null;
+        looking.remove(id);
+        return last && !lookMoved && System.currentTimeMillis() - lookDownAt < 350;
+    }
+
+    private void applyZoom() {
+        float half = 0.5f / zoom;
+        zoomCx = Math.max(half, Math.min(1 - half, zoomCx));
+        zoomCy = Math.max(half, Math.min(1 - half, zoomCy));
+        if (screenRenderer != null) {
+            screenRenderer.zoom = zoom;
+            screenRenderer.centerX = zoomCx;
+            screenRenderer.centerY = zoomCy;
+            if (requestRender != null) requestRender.run();
+        }
+        invalidate();
+    }
+
+    /** the whole picture again (play goes on) */
+    void resetZoom() {
+        if (zoom == 1 && zoomCx == 0.5f && zoomCy == 0.5f) return;
+        zoom = 1;
+        zoomCx = zoomCy = 0.5f;
+        applyZoom();
     }
 
     // ------------------------------------------------------------------ external controllers

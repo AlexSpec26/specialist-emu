@@ -371,9 +371,9 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
     private double playerSec;
     /**
      * Player seconds per emulated T-state: 1 / CPU_HZ at real speed, 1/4 of it at ×4, more when
-     * slowed down. Set by the emulation thread before each slice.
+     * slowed down. Set by the emulation thread (the one that runs the machine) before each slice.
      */
-    public volatile double playerRate = 1.0 / (50.0 * T_FRAME);
+    public double playerRate = 1.0 / (50.0 * T_FRAME);
 
     /** re-executes up to the target, then forgets the history after it */
     private void replay(long targetInstr, long targetAbs) {

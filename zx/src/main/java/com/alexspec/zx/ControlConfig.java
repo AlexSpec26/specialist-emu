@@ -11,18 +11,21 @@ import com.alexspec.zx.core.Spectrum48;
 final class ControlConfig {
     static final int UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3;
     static final int BUTTON0 = 4;
-    static final int MAX_BUTTONS = 4;
+    static final int MAX_BUTTONS = 8;
     static final int SLOTS = BUTTON0 + MAX_BUTTONS;
     static final String DEFAULT_PROFILE = "";
 
     static final String[] SLOT_NAMES = {
         "Джойстик ↑", "Джойстик ↓", "Джойстик ←", "Джойстик →",
         "Кнопка 1", "Кнопка 2", "Кнопка 3", "Кнопка 4",
+        "Кнопка 5", "Кнопка 6", "Кнопка 7", "Кнопка 8",
     };
+    /** buttons 5-8 (layouts and games only name 1-4): the keys 2, 3, 4, 5 */
+    private static final int[] EXTRA = {16, 17, 18, 19};
 
     private static final int K = Spectrum48.KEMPSTON;
 
-    /** ready-made layouts: name, then up, down, left, right, button 1..4 */
+    /** ready-made layouts: name, then up, down, left, right, button 1..4 (5..8 from EXTRA) */
     static final String[] PRESET_NAMES = {
         "Кемпстон (огонь, пробел, ENTER, 1)",
         "Синклер, левый порт (9 8 6 7, огонь 0)",
@@ -43,11 +46,13 @@ final class ControlConfig {
     }
 
     void setDefaults() {
-        System.arraycopy(PRESETS[0], 0, keys, 0, SLOTS);
+        set(PRESETS[0]);
     }
 
     void set(int[] preset) {
-        System.arraycopy(preset, 0, keys, 0, SLOTS);
+        int n = Math.min(preset.length, SLOTS);
+        System.arraycopy(preset, 0, keys, 0, n);
+        for (int i = n; i < SLOTS; i++) keys[i] = EXTRA[i - BUTTON0 - 4];
     }
 
     private static String prefKey(String profile) {
