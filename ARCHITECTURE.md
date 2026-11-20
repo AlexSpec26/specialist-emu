@@ -7,9 +7,10 @@ app/        SPEC: Android-приложение «Специалист» (com.ale
   *.java    EmuActivity (меню), EmuThread (50 Гц, звук), MainView (экран, клавиатура, джойстик),
             MapPanel + Tutorial (карта памяти, экскурсия), MicTape, ControlConfig
 zx/         ZX: Android-приложение ZX Spectrum 48K (com.alexspec.zx)
-  core/     Z80, Spectrum48 (ULA, задержки, бордюр, история/шаги), Tape (TAP/TZX), MemTrace,
-            TapeDecoder, Z80Dis
-  *.java    как в app + Games (игры в комплекте), Speed, ZxKeys
+  core/     Z80, Spectrum48 (ULA, задержки, бордюр, история/шаги, часы игрока и ⟲ 5 с, сохранения
+            v2 с историей — ADR-031), Tape (TAP/TZX), MemTrace, TapeDecoder, Z80Dis
+  *.java    как в app + Games (игры в комплекте), Speed, ZxKeys, ScreenRenderer (экран через GLES 2,
+            assets/screen.frag — тот же шейдер, что в DOS/SPEC; MainView над ним прозрачен в месте картинки)
   assets/   48k.rom, games/*.tap|tzx + LICENSE.txt
 atari/      ATARI: Android-приложение Atari 65XE (com.alexspec.atari), подробно — atari/README.md
   java/     как в zx (EmuActivity, MainView, MapPanel, EmuThread…) + AtariKeys, Games, Tutorial;
