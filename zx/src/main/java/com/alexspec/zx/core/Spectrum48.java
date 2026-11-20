@@ -5,6 +5,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicIntegerArray;
 
 /**
@@ -364,6 +365,15 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
 
     private boolean replaying;
     private final int[] replayKeys = new int[9];
+    /** player seconds per T-state while replaying (the pace recorded in the history) */
+    private double replayRate;
+    /** the player's clock, see {@link #playerTime} */
+    private double playerSec;
+    /**
+     * Player seconds per emulated T-state: 1 / CPU_HZ at real speed, 1/4 of it at ×4, more when
+     * slowed down. Set by the emulation thread before each slice.
+     */
+    public volatile double playerRate = 1.0 / (50.0 * T_FRAME);
 
     /** re-executes up to the target, then forgets the history after it */
     private void replay(long targetInstr, long targetAbs) {
@@ -417,6 +427,7 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
             Tape tp = tape;
             if (tp != null) tp.advance(dt);
             cycleCount += dt;
+            playerSec += dt * (replaying ? replayRate : playerRate);
             audioStep(dt);
         }
         instr++;
@@ -482,6 +493,10 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         final byte[] ram = new byte[0xC000];
         final int[] regs = new int[40];
         long instr, cycles, abs;
+        /** the player's clock at this point, seconds (see {@link #playerTime}) */
+        double player;
+        /** read from a save file: the tape is not part of it, restoring leaves the tape alone */
+        boolean keepTape;
         Tape tape;
         long[] tapeState;
         int[][] script;
@@ -540,6 +555,8 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         s.instr = instr;
         s.cycles = cycleCount;
         s.abs = time();
+        s.player = playerSec;
+        s.keepTape = false;
         s.tape = tape;
         s.tapeState = tape != null ? tape.saveState() : null;
         s.script = script;
@@ -558,8 +575,11 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         romLoaderFrames = r[34]; progStart = r[35]; progEnd = r[36]; scriptPos = r[37]; scriptTimer = r[38];
         instr = s.instr;
         cycleCount = s.cycles;
-        tape = s.tape;
-        if (s.tape != null && s.tapeState != null) s.tape.loadState(s.tapeState);
+        playerSec = s.player;
+        if (!s.keepTape) {
+            tape = s.tape;
+            if (s.tape != null && s.tapeState != null) s.tape.loadState(s.tapeState);
+        }
         script = s.script;
         System.arraycopy(s.scriptRows, 0, scriptRows, 0, 8);
         bLogN = 0;
@@ -567,15 +587,42 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
         renderStatic();
     }
 
-    /** latest snapshot at or before the condition; null if none */
-    private Snap findSnap(long targetInstr, long targetAbs) {
-        Snap best = null;
+    /**
+     * Age (0 = newest) of the latest snapshot at or before the condition; the oldest one if none
+     * is that old; -1 without history.
+     */
+    private int findSnap(long targetInstr, long targetAbs, double targetPlayer) {
         for (int k = 0; k < histCount; k++) {
             Snap s = hist[(histHead + HISTORY - 1 - k) % HISTORY];
-            if (s.instr <= targetInstr && s.abs <= targetAbs) return s;
-            best = s; // oldest seen so far
+            if (s.instr <= targetInstr && s.abs <= targetAbs && s.player <= targetPlayer) return k;
         }
-        return best == null ? null : best;
+        return histCount - 1;
+    }
+
+    private Snap snapAt(int age) {
+        return hist[(histHead + HISTORY - 1 - age) % HISTORY];
+    }
+
+    /**
+     * Restores the snapshot of that age and replays up to the target. The player's clock runs
+     * through the replay at the pace it really had between this snapshot and the next one (or
+     * now), so it comes out where it was at that moment.
+     */
+    private void restoreAndReplay(int age, long targetInstr, long targetAbs) {
+        Snap s = snapAt(age);
+        long nAbs;
+        double nPlayer;
+        if (age > 0) {
+            Snap n = snapAt(age - 1);
+            nAbs = n.abs;
+            nPlayer = n.player;
+        } else {
+            nAbs = time();
+            nPlayer = playerSec;
+        }
+        replayRate = nAbs > s.abs ? (nPlayer - s.player) / (nAbs - s.abs) : playerRate;
+        restore(s);
+        replay(targetInstr, targetAbs);
     }
 
     /**
@@ -584,22 +631,60 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
      */
     public boolean backInstructions(long n) {
         long target = instr - n;
-        Snap s = findSnap(target, Long.MAX_VALUE);
-        if (s == null) return false;
-        restore(s);
-        replay(target, Long.MAX_VALUE);
-        return s.instr <= target;
+        int age = findSnap(target, Long.MAX_VALUE, Double.MAX_VALUE);
+        if (age < 0) return false;
+        boolean ok = snapAt(age).instr <= target;
+        restoreAndReplay(age, target, Long.MAX_VALUE);
+        return ok;
     }
 
     /** Goes back {@code t} T-states of emulated time (to an instruction boundary). */
     public boolean backTime(long t) {
         long target = time() - t;
-        Snap s = findSnap(Long.MAX_VALUE, target);
-        if (s == null) return false;
-        restore(s);
-        boolean ok = s.abs <= target;
-        if (ok) replay(Long.MAX_VALUE, target);
+        int age = findSnap(Long.MAX_VALUE, target, Double.MAX_VALUE);
+        if (age < 0) return false;
+        boolean ok = snapAt(age).abs <= target;
+        restoreAndReplay(age, Long.MAX_VALUE, ok ? target : Long.MIN_VALUE);
         return ok;
+    }
+
+    /**
+     * Goes back {@code sec} seconds of the player's clock — the time the player lived through,
+     * whatever the speed was (×4, slow motion, fast tape loading). Lands exactly on that moment
+     * (to an instruction boundary), replaying the recorded keys from the snapshot before it.
+     * Returns the seconds actually gone back: less if the history is shorter, 0 without history.
+     */
+    public double backPlayer(double sec) {
+        if (histCount == 0) return 0;
+        double from = playerSec, target = from - sec;
+        int age = findSnap(Long.MAX_VALUE, Long.MAX_VALUE, target);
+        Snap s = snapAt(age);
+        long absTarget;
+        if (s.player > target) {
+            absTarget = Long.MIN_VALUE; // history is shorter: the oldest point
+        } else {
+            long nAbs = age > 0 ? snapAt(age - 1).abs : time();
+            double nPlayer = age > 0 ? snapAt(age - 1).player : playerSec;
+            double f = nPlayer > s.player ? (target - s.player) / (nPlayer - s.player) : 0;
+            absTarget = s.abs + (long) Math.floor(f * (nAbs - s.abs));
+        }
+        restoreAndReplay(age, Long.MAX_VALUE, absTarget);
+        return from - playerSec;
+    }
+
+    /**
+     * The player's clock, seconds: grows by {@link #playerRate} per T-state, so it counts the
+     * time the player lives through (set by the emulation thread from the speed), not the
+     * emulated time. Going back sets it back too.
+     */
+    public double playerTime() {
+        return playerSec;
+    }
+
+    /** seconds of the player's clock the history reaches back */
+    public double historyPlayerSeconds() {
+        if (histCount == 0) return 0;
+        return playerSec - hist[(histHead + HISTORY - histCount) % HISTORY].player;
     }
 
     /** seconds of history currently available */
@@ -873,58 +958,208 @@ public final class Spectrum48 implements Z80.Bus, MemTrace.Mem {
     // ------------------------------------------------------------------ save states
 
     private static final int STATE_MAGIC = 0x5A583438; // "ZX48"
-    private static final int STATE_VERSION = 1;
+    /** 1: the machine only; 2: the machine, its clocks and a minute of history (compressed) */
+    private static final int STATE_VERSION = 2;
+    /** in a save file, one snapshot of the history per this many (1 s apart) */
+    private static final int SAVE_SNAP_EVERY = 10;
 
+    /** the save file of the machine with its history, so that going back works after loading */
     public byte[] saveState() {
         try {
-            ByteArrayOutputStream bos = new ByteArrayOutputStream(0xC100);
-            DataOutputStream o = new DataOutputStream(bos);
-            o.writeInt(STATE_MAGIC);
-            o.writeInt(STATE_VERSION);
-            Z80 c = cpu;
-            int[] regs = {c.a, c.f, c.b, c.c, c.d, c.e, c.h, c.l, c.a_, c.f_, c.b_, c.c_, c.d_, c.e_, c.h_, c.l_,
-                c.ix, c.iy, c.sp, c.pc, c.i, c.getR(), c.memptr, c.im};
-            for (int v : regs) o.writeShort(v);
-            o.writeBoolean(c.iff1);
-            o.writeBoolean(c.iff2);
-            o.writeBoolean(c.halted);
-            o.writeInt((int) c.t);
-            o.writeByte(border);
-            o.writeBoolean(ear);
-            o.write(mem, 0x4000, 0xC000);
-            o.writeInt(progStart);
-            o.writeInt(progEnd);
-            o.flush();
+            ByteArrayOutputStream bos = new ByteArrayOutputStream(1 << 20);
+            DataOutputStream head = new DataOutputStream(bos);
+            head.writeInt(STATE_MAGIC);
+            head.writeInt(STATE_VERSION);
+            head.flush();
+            java.util.zip.Deflater def = new java.util.zip.Deflater(6);
+            DataOutputStream o = new DataOutputStream(new java.util.zip.DeflaterOutputStream(bos, def, 1 << 16));
+            writeMachine(o);
+            // v2: clocks and everything a snapshot restores
+            o.writeBoolean(cpu.eiDelay);
+            o.writeBoolean(mic);
+            o.writeInt(frameStartBorder);
+            o.writeInt(frameCount);
+            o.writeInt(romLoaderFrames);
+            o.writeLong(cycleCount);
+            o.writeLong(instr);
+            o.writeDouble(playerSec);
+            // the history: every SAVE_SNAP_EVERY-th snapshot (the newest always) …
+            List<Snap> keep = new java.util.ArrayList<>();
+            for (int age = 0; age < histCount; age += SAVE_SNAP_EVERY) keep.add(snapAt(age));
+            o.writeInt(keep.size());
+            for (int k = keep.size() - 1; k >= 0; k--) { // oldest first
+                Snap sn = keep.get(k);
+                for (int v : sn.regs) o.writeInt(v);
+                o.writeLong(sn.instr);
+                o.writeLong(sn.cycles);
+                o.writeLong(sn.abs);
+                o.writeDouble(sn.player);
+                for (int v : sn.scriptRows) o.writeInt(v);
+                o.write(sn.ram);
+            }
+            // … and the keys of every frame since the oldest of them
+            long from = keep.isEmpty() ? Long.MAX_VALUE : keep.get(keep.size() - 1).abs;
+            int nk = 0;
+            for (int k = 0; k < keyCount; k++) if (keyAbs[(keyHead + KEYLOG - keyCount + k) % KEYLOG] >= from) nk++;
+            o.writeInt(nk);
+            for (int k = 0; k < keyCount; k++) {
+                int i = (keyHead + KEYLOG - keyCount + k) % KEYLOG;
+                if (keyAbs[i] < from) continue;
+                o.writeLong(keyAbs[i]);
+                for (int v : keyLog[i]) o.writeInt(v);
+            }
+            o.close();
+            def.end();
             return bos.toByteArray();
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }
     }
 
-    public void loadState(byte[] s) throws IOException {
-        DataInputStream in = new DataInputStream(new ByteArrayInputStream(s));
-        if (in.readInt() != STATE_MAGIC || in.readInt() != STATE_VERSION)
-            throw new IOException("Неверный файл состояния");
+    private void writeMachine(DataOutputStream o) throws IOException {
         Z80 c = cpu;
-        int[] r = new int[24];
-        for (int k = 0; k < r.length; k++) r[k] = in.readUnsignedShort();
+        int[] regs = {c.a, c.f, c.b, c.c, c.d, c.e, c.h, c.l, c.a_, c.f_, c.b_, c.c_, c.d_, c.e_, c.h_, c.l_,
+            c.ix, c.iy, c.sp, c.pc, c.i, c.getR(), c.memptr, c.im};
+        for (int v : regs) o.writeShort(v);
+        o.writeBoolean(c.iff1);
+        o.writeBoolean(c.iff2);
+        o.writeBoolean(c.halted);
+        o.writeInt((int) c.t);
+        o.writeByte(border);
+        o.writeBoolean(ear);
+        o.write(mem, 0x4000, 0xC000);
+        o.writeInt(progStart);
+        o.writeInt(progEnd);
+    }
+
+    /** the machine part, read into temporaries first: a broken file leaves the machine alone */
+    private static final class Loaded {
+        final int[] r = new int[24];
+        boolean iff1, iff2, halted, ear;
+        int t, border, progStart, progEnd;
+        final byte[] ram = new byte[0xC000];
+        // v2
+        boolean v2, eiDelay, mic;
+        int frameStartBorder, frameCount, romLoaderFrames;
+        long cycles, instr;
+        double player;
+        Snap[] snaps = new Snap[0];
+        long[] keyAbs = new long[0];
+        int[][] keys = new int[0][];
+    }
+
+    private static Loaded readMachine(DataInputStream in) throws IOException {
+        Loaded l = new Loaded();
+        for (int k = 0; k < l.r.length; k++) l.r[k] = in.readUnsignedShort();
+        l.iff1 = in.readBoolean();
+        l.iff2 = in.readBoolean();
+        l.halted = in.readBoolean();
+        l.t = in.readInt();
+        l.border = in.readUnsignedByte();
+        l.ear = in.readBoolean();
+        in.readFully(l.ram);
+        l.progStart = in.readInt();
+        l.progEnd = in.readInt();
+        if (l.t < 0 || l.t > T_FRAME + 64) throw new IOException("Неверный файл состояния");
+        return l;
+    }
+
+    /**
+     * Loads a save file (version 1 — the machine only, or 2 — with its history). The whole file
+     * is read and checked before the machine is touched.
+     */
+    public void loadState(byte[] s) throws IOException {
+        Loaded l;
+        try {
+            DataInputStream head = new DataInputStream(new ByteArrayInputStream(s));
+            if (head.readInt() != STATE_MAGIC) throw new IOException("Неверный файл состояния");
+            int ver = head.readInt();
+            if (ver == 1) {
+                l = readMachine(head);
+            } else if (ver == 2) {
+                DataInputStream in = new DataInputStream(new java.util.zip.InflaterInputStream(
+                        new ByteArrayInputStream(s, 8, s.length - 8)));
+                l = readMachine(in);
+                l.v2 = true;
+                l.eiDelay = in.readBoolean();
+                l.mic = in.readBoolean();
+                l.frameStartBorder = in.readInt();
+                l.frameCount = in.readInt();
+                l.romLoaderFrames = in.readInt();
+                l.cycles = in.readLong();
+                l.instr = in.readLong();
+                l.player = in.readDouble();
+                int n = in.readInt();
+                if (n < 0 || n > HISTORY) throw new IOException("Неверный файл состояния");
+                l.snaps = new Snap[n];
+                for (int k = 0; k < n; k++) {
+                    Snap sn = new Snap();
+                    for (int i = 0; i < sn.regs.length; i++) sn.regs[i] = in.readInt();
+                    sn.instr = in.readLong();
+                    sn.cycles = in.readLong();
+                    sn.abs = in.readLong();
+                    sn.player = in.readDouble();
+                    for (int i = 0; i < 8; i++) sn.scriptRows[i] = in.readInt();
+                    in.readFully(sn.ram);
+                    sn.keepTape = true;
+                    sn.script = null;
+                    l.snaps[k] = sn;
+                }
+                int nk = in.readInt();
+                if (nk < 0 || nk > KEYLOG) throw new IOException("Неверный файл состояния");
+                l.keyAbs = new long[nk];
+                l.keys = new int[nk][9];
+                for (int k = 0; k < nk; k++) {
+                    l.keyAbs[k] = in.readLong();
+                    for (int i = 0; i < 9; i++) l.keys[k][i] = in.readInt();
+                }
+            } else {
+                throw new IOException("Неверный файл состояния");
+            }
+        } catch (java.io.EOFException | java.util.zip.ZipException e) {
+            throw new IOException("Файл состояния испорчен", e);
+        }
+
+        Z80 c = cpu;
+        int[] r = l.r;
         c.a = r[0]; c.f = r[1]; c.b = r[2]; c.c = r[3]; c.d = r[4]; c.e = r[5]; c.h = r[6]; c.l = r[7];
         c.a_ = r[8]; c.f_ = r[9]; c.b_ = r[10]; c.c_ = r[11]; c.d_ = r[12]; c.e_ = r[13]; c.h_ = r[14]; c.l_ = r[15];
         c.ix = r[16]; c.iy = r[17]; c.sp = r[18]; c.pc = r[19]; c.i = r[20]; c.setR(r[21]); c.memptr = r[22]; c.im = r[23];
-        c.iff1 = in.readBoolean();
-        c.iff2 = in.readBoolean();
-        c.halted = in.readBoolean();
-        c.t = in.readInt();
-        border = frameStartBorder = in.readUnsignedByte();
-        ear = in.readBoolean();
-        in.readFully(mem, 0x4000, 0xC000);
-        progStart = in.readInt();
-        progEnd = in.readInt();
+        c.iff1 = l.iff1;
+        c.iff2 = l.iff2;
+        c.halted = l.halted;
+        c.t = l.t;
+        border = frameStartBorder = l.border;
+        ear = l.ear;
+        System.arraycopy(l.ram, 0, mem, 0x4000, 0xC000);
+        progStart = l.progStart;
+        progEnd = l.progEnd;
         bLogN = 0;
         script = null;
         java.util.Arrays.fill(scriptRows, 0);
         frameOpen = false;
         clearHistory();
         releaseAllKeys();
+        if (l.v2) {
+            c.eiDelay = l.eiDelay;
+            mic = l.mic;
+            frameStartBorder = l.frameStartBorder;
+            frameCount = l.frameCount;
+            romLoaderFrames = l.romLoaderFrames;
+            cycleCount = l.cycles;
+            instr = l.instr;
+            playerSec = l.player;
+            for (Snap sn : l.snaps) {
+                hist[histHead] = sn;
+                histHead = (histHead + 1) % HISTORY;
+                histCount++;
+            }
+            for (int k = 0; k < l.keyAbs.length; k++) {
+                keyAbs[keyHead] = l.keyAbs[k];
+                System.arraycopy(l.keys[k], 0, keyLog[keyHead], 0, 9);
+                keyHead = (keyHead + 1) % KEYLOG;
+                keyCount++;
+            }
+        }
     }
 }
