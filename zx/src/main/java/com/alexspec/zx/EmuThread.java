@@ -185,6 +185,9 @@ final class EmuThread extends Thread {
             double sp = Math.max(1.0 / Spectrum48.CPU_HZ, Math.min(4, speed));
             boolean turbo = turboLoad && sp == 1 && tapeLoading();
             turboActive = turbo;
+            // the player's clock (⟲ 5 s): one real frame of 20 ms is spread over what runs in it
+            double perReal = sp > 1 ? Math.round(sp) : turbo ? 10 : sp;
+            machine.playerRate = 1.0 / ((double) FPS * Spectrum48.T_FRAME * perReal);
             int samples;
             if (sp > 1) {
                 // x2 / x4: several frames per real frame, their sound squeezed together

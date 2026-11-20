@@ -17,6 +17,7 @@ import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import com.alexspec.zx.core.MemTrace;
@@ -44,6 +45,8 @@ public final class EmuActivity extends Activity implements MainView.Host {
     private EmuThread emu;
     private Spectrum48 machine;
     private MainView view;
+    private ScreenRenderer screenRenderer;
+    private android.opengl.GLSurfaceView glView;
     private SharedPreferences prefs;
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -80,9 +83,27 @@ public final class EmuActivity extends Activity implements MainView.Host {
         emu = new EmuThread(machine, () -> {
             MainView v = view;
             if (v != null) v.postInvalidateOnAnimation();
+            android.opengl.GLSurfaceView g = glView;
+            if (g != null) g.requestRender();
         });
         view = new MainView(this, emu, this);
-        setContentView(view);
+        // the picture goes through the phone's video chip (screen modes, magnifier), as in DOS 286
+        // and the Specialist; MainView on top keeps the picture's place transparent
+        screenRenderer = new ScreenRenderer(this, emu, 0xFF000000);
+        glView = new android.opengl.GLSurfaceView(this);
+        glView.setEGLContextClientVersion(2);
+        glView.setRenderer(screenRenderer);
+        glView.setRenderMode(android.opengl.GLSurfaceView.RENDERMODE_WHEN_DIRTY);
+        view.screenRenderer = screenRenderer;
+        view.requestRender = glView::requestRender;
+        FrameLayout root = new FrameLayout(this);
+        root.addView(glView);
+        root.addView(view);
+        root.setOnApplyWindowInsetsListener((v, in) -> {
+            view.dispatchApplyWindowInsets(in);
+            return in;
+        });
+        setContentView(root);
         applySettings();
 
         String saved = prefs.getString("autosaveProgram", null);
@@ -113,6 +134,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
     protected void onResume() {
         super.onResume();
         resumed = true;
+        if (glView != null) glView.onResume();
         hideSystemBars();
         emu.setPaused(false);
         updateMic();
@@ -134,6 +156,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
             }
         });
         emu.setPaused(true);
+        if (glView != null) glView.onPause();
         super.onPause();
     }
 
@@ -287,8 +310,15 @@ public final class EmuActivity extends Activity implements MainView.Host {
         view.buttonCount = prefs.getInt("buttons", 3);
         view.joy8 = prefs.getBoolean("joy8", true);
         view.vibrate = prefs.getBoolean("vibrate", true);
-        // black-and-white TV: the machine draws in greys; post() also redraws a paused picture
-        boolean mono = prefs.getBoolean("mono", false);
+        // the screen (ZX-016): the video chip draws the chosen tube; colour TV by default (the owner
+        // chose the "lamp" look); the old "black-and-white TV" setting becomes that mode
+        if (!prefs.contains("screenMode") && prefs.getBoolean("mono", false))
+            prefs.edit().putInt("screenMode", ScreenRenderer.MODE_BW_TV).apply();
+        int mode = Math.max(0, Math.min(ScreenRenderer.MODE_NAMES.length - 1, prefs.getInt("screenMode", ScreenRenderer.MODE_COLOR_TV)));
+        screenRenderer.mode = mode;
+        if (glView != null) glView.requestRender();
+        // the machine draws in colour; only if the video chip failed does it draw the greys itself
+        boolean mono = screenRenderer.failed && mode == ScreenRenderer.MODE_BW_TV;
         if (mono != machine.isMono()) emu.post(() -> machine.setMono(mono));
         emu.sound = prefs.getBoolean("sound", true);
         int step = Math.max(0, Math.min(Speed.STEPS - 1, prefs.getInt("speedStep", Speed.REAL)));
@@ -348,7 +378,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
         }
         emu.setUserPaused(p);
         if (!p) emu.stepping = false;
-        view.paused = tapPaused || view.isPicking();
+        view.setPaused(tapPaused || view.isPicking());
         view.invalidate();
     }
 
@@ -376,6 +406,24 @@ public final class EmuActivity extends Activity implements MainView.Host {
                         "Дальше назад нельзя: история хранит %.0f с (после загрузки — с её момента)", Math.max(0, h))));
             }
             ui.post(view::showMachineInfo);
+        });
+    }
+
+    /**
+     * ⟲ 5 s (ZX-016): back 5 seconds of the time the player lived through — at ×4 that is 20 s of
+     * the game, at 1/8 about 0,6 s; exactly to that moment, the recorded keys replayed. Works
+     * playing and paused (stays paused).
+     */
+    @Override
+    public void onRewind() {
+        emu.postKeepScreen(() -> {
+            double went = machine.backPlayer(5);
+            ui.post(() -> {
+                if (went <= 0.05) view.showNote("⟲ дальше назад нельзя");
+                else view.showNote(String.format(Locale.ROOT, went < 4.95 ? "⟲ %.1f с — дальше нет" : "⟲ %.1f с", went)
+                        .replace('.', ','));
+                if (tapPaused) view.showMachineInfo();
+            });
         });
     }
 
@@ -809,21 +857,27 @@ public final class EmuActivity extends Activity implements MainView.Host {
                         + "на следующую клавишу (повторное нажатие — отмена). Белым на клавише — ключевое "
                         + "слово BASIC (в режиме K одна клавиша = целое слово), красным — символ с SYM, "
                         + "синим на цифрах — функция с CAPS (CAPS+0 — удалить, CAPS+5…8 — стрелки).\n\n"
+                        + "⟲ 5 с — назад на 5 секунд того времени, что вы прожили, при любой скорости: при ×4 это "
+                        + "20 секунд игры, при замедлении в 8 раз — около 0,6 с. Ровно на тот момент, с теми же "
+                        + "нажатыми клавишами. Можно нажимать подряд, пока хватает истории (минута игры).\n\n"
                         + "Пауза: нажмите на экран — посреди экрана появится маленький знак паузы. В паузе вместо названия программы (сбоку от экрана, если телефон лежит) — кнопки: на секунду и на одну команду "
-                        + "назад и вперёд. После шага 4 секунды видны луч и текущая команда процессора с регистрами (под панелью, вне картинки). "
+                        + "назад и вперёд. После шага 4 секунды видны текущая команда процессора с регистрами и где луч "
+                        + "(под панелью, вне картинки; красные метки на краю картинки показывают луч). "
+                        + "На паузе картинку можно разглядывать: два пальца — лупа до ×24, один — двигать. "
                         + "Назад можно уйти на минуту. При шагах по одной команде на карте памяти светится "
                         + "только эта команда: её байты голубым и ячейки, которые она прочитала или записала. "
                         + "Пока открыто меню, эмуляция тоже стоит.\n\n"
-                        + "Сохранения: у каждой игры своё. Значок 💾 в списках — у игры есть сохранение.\n\n"
+                        + "Сохранения: у каждой игры своё, вместе с минутой истории — после загрузки ⟲ тоже работает. "
+                        + "Значок 💾 в списках — у игры есть сохранение.\n\n"
                         + "Скорость: от ×4 до 1 такта в секунду, каждый шаг ползунка — вдвое.\n\n"
                         + "Визуализация памяти: карта всех 64 КБ под экраном, байты вспыхивают при "
                         + "чтении, записи и исполнении; вспышка длится столько же реального времени при любой "
                         + "скорости, но не меньше одной команды; тап по карте — что это за адрес; есть экскурсия.\n\n"
                         + "Файлы: Android/data/com.alexspec.zx/files (папки programs и states), их видно "
                         + "с компьютера по USB.\n\n"
-                        + "Телевизор: «Настройки» → «Телевизор» — цветной или чёрно-белый, как у тех, кто "
-                        + "подключал Спектрум к чёрно-белому телевизору: цвета становятся оттенками серого "
-                        + "(у Спектрума яркость растёт с номером цвета, так что все 8 цветов различимы).\n\n"
+                        + "Экран: «Настройки» → «Экран» — цветной телевизор (по умолчанию), чёрно-белый (цвета "
+                        + "становятся оттенками серого; у Спектрума яркость растёт с номером цвета, так что все 8 "
+                        + "цветов различимы), чёткие пиксели, зелёный и янтарный мониторы.\n\n"
                         + "Физическая клавиатура: Shift — CAPS SHIFT, Alt/Ctrl — SYMBOL SHIFT, "
                         + "Backspace — DELETE. Геймпад: крестовина — джойстик, A/B/X/Y — кнопки 1–4.")
                 .setPositiveButton("OK", null));
@@ -854,14 +908,14 @@ public final class EmuActivity extends Activity implements MainView.Host {
             "Джойстик: " + (view.joy8 ? "8 направлений" : "4 направления"),
             "Звук: " + (emu.sound ? "вкл" : "выкл"),
             "Вибрация: " + (view.vibrate ? "вкл" : "выкл"),
-            "Телевизор: " + (prefs.getBoolean("mono", false) ? "чёрно-белый" : "цветной"),
+            "Экран: " + ScreenRenderer.MODE_NAMES[screenRenderer.mode],
         };
         show(new AlertDialog.Builder(this)
                 .setTitle("Настройки")
                 .setItems(items, (d, which) -> {
                     switch (which) {
                         case 0: {
-                            String[] counts = {"1", "2", "3", "4"};
+                            String[] counts = {"1", "2", "3", "4", "5", "6", "7", "8"};
                             show(new AlertDialog.Builder(this)
                                     .setTitle("Кнопок справа")
                                     .setSingleChoiceItems(counts, view.buttonCount - 1, (d2, w) -> {
@@ -881,9 +935,17 @@ public final class EmuActivity extends Activity implements MainView.Host {
                         case 3:
                             prefs.edit().putBoolean("vibrate", !view.vibrate).apply();
                             break;
-                        default:
-                            prefs.edit().putBoolean("mono", !prefs.getBoolean("mono", false)).apply();
-                            break;
+                        default: {
+                            show(new AlertDialog.Builder(this)
+                                    .setTitle("Экран")
+                                    .setSingleChoiceItems(ScreenRenderer.MODE_NAMES, screenRenderer.mode, (d2, w) -> {
+                                        prefs.edit().putInt("screenMode", w).apply();
+                                        d2.dismiss();
+                                        applySettings();
+                                        showSettings();
+                                    }));
+                            return;
+                        }
                     }
                     applySettings();
                     showSettings();
