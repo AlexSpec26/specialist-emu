@@ -551,6 +551,7 @@ final class MainView extends View {
         }
         // pause: only a small translucent sign in the middle; the step buttons are outside the picture
         if (paused && machine.isRomLoaded() && pickPrompt == null && zoom <= 1.01f) drawPauseSign(c);
+        drawBot(c);
 
         if (!machine.isRomLoaded()) {
             text.setTextSize(18 * dp);
@@ -744,6 +745,50 @@ final class MainView extends View {
     private int ca(int color) {
         int a = (color >>> 24) & 0xFF;
         return ((int) (a * ctrlAlpha) << 24) | (color & 0xFFFFFF);
+    }
+
+    private final Paint botPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    /** the bot's tried futures over the picture: blue tried, red death, green the one it plays */
+    private void drawBot(Canvas c) {
+        com.alexspec.specialist.core.Explorer b = emu.bot;
+        if (b == null || zoom > 1.01f) return;
+        com.alexspec.specialist.core.Explorer.View v = b.view;
+        if (v == null) return;
+        float sx = screenRect.width() / Specialist.WIDTH, sy = screenRect.height() / Specialist.HEIGHT;
+        botPaint.setStyle(Paint.Style.STROKE);
+        botPaint.setStrokeCap(Paint.Cap.ROUND);
+        botPaint.setStrokeJoin(Paint.Join.ROUND);
+        com.alexspec.specialist.core.Explorer.Future_ best = null;
+        for (com.alexspec.specialist.core.Explorer.Future_ f : v.futures) {
+            if (f.kind == 2) { best = f; continue; }
+            botPaint.setColor(f.kind == 1 ? 0x70FF3C3C : 0x4650AAFF);
+            botPaint.setStrokeWidth(1.5f * dp);
+            botPath(c, f.path, sx, sy);
+        }
+        if (best != null) {
+            botPaint.setColor(0xE650FF78);
+            botPaint.setStrokeWidth(2.5f * dp);
+            botPath(c, best.path, sx, sy);
+        }
+    }
+
+    private void botPath(Canvas c, int[] p, float sx, float sy) {
+        if (p == null || p.length < 2) return;
+        float lx = 0, ly = 0;
+        boolean have = false;
+        for (int i = 0; i + 1 < p.length; i += 2) {
+            float x = screenRect.left + (p[i] + 4) * sx, y = screenRect.top + (p[i + 1] + 4) * sy;
+            if (x < screenRect.left - 4 || x > screenRect.right + 4 || y < screenRect.top - 4 || y > screenRect.bottom + 4) continue;
+            if (have) c.drawLine(lx, ly, x, y, botPaint);
+            have = true;
+            lx = x;
+            ly = y;
+        }
+        if (!have) return;
+        botPaint.setStyle(Paint.Style.FILL);
+        c.drawCircle(lx, ly, 2.5f * dp, botPaint);
+        botPaint.setStyle(Paint.Style.STROKE);
     }
 
     private void drawControls(Canvas c) {
@@ -979,7 +1024,14 @@ final class MainView extends View {
         if (vibrate) performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
     }
 
+    /** the player touched the game controls: the bot lets go for 2 s after the last touch */
+    private void botYield() {
+        com.alexspec.specialist.core.Explorer b = emu.bot;
+        if (b != null) b.userInput(machine, 2000);
+    }
+
     private void press(int id, int t, float x, float y) {
+        if (t == T_JOY || (t >= T_BUTTON && t < T_STEP)) botYield();
         if (t >= T_STEP) {
             haptic();
             host.onStep(t - T_STEP);
@@ -1049,6 +1101,7 @@ final class MainView extends View {
     }
 
     private void release(int id, int t) {
+        if (t == T_JOY || (t >= T_BUTTON && t < T_STEP)) botYield();
         if (t >= T_STEP) return;
         if (t == T_MAP) {
             map.up(id, lastUpX, lastUpY);
@@ -1131,6 +1184,7 @@ final class MainView extends View {
     }
 
     private void updateJoy(float x, float y) {
+        botYield();
         float dx = x - joyCx, dy = y - joyCy;
         float dist = (float) Math.sqrt(dx * dx + dy * dy);
         if (dist > joyR) {

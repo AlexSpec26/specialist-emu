@@ -99,6 +99,11 @@ public final class Specialist implements Bus {
         romLoaded = true;
     }
 
+    /** a copy of the monitor ROM (the bot's machine copies need it: saved states do not carry it) */
+    public byte[] romImage() {
+        return rom.clone();
+    }
+
     public boolean isRomLoaded() {
         return romLoaded;
     }
