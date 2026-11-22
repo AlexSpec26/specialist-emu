@@ -1,0 +1,14 @@
+# Lode Runner (А. Щербина, 1990): 2 = курсор, 0 = старт; огонь — пробел вместе со стрелкой
+title=Lode Runner (А. Щербина)
+crc=e3656f46
+names=loderun,lode runner,lode_runner,лод раннер
+game=loderun.rks
+start=f 200,k SP 5,f 150,k 2 5,f 50,k 0 5,f 300,k SP 3,f 300,k SP 3,f 300,k SP 3,f 100
+hero=xy 84B6 84B5 64 28
+lives=byte 8409
+score=ascii 840C 7
+fire=Пробел
+combo=1
+step=8
+# игра замирает в момент гибели (счётчик кадров 84B3 стоит), жизни списываются только через ~60 кадров
+dead=tick 84B3

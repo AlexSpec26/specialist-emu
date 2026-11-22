@@ -43,6 +43,8 @@ final class EmuThread extends Thread {
     private double lastSpeed = 1;
     volatile boolean sound = true;
     volatile int colorMode = Specialist.COLOR_WHITE;
+    /** the explorer bot (SPEC-022): plays when set; set and cleared from the emulation thread (post) */
+    volatile com.alexspec.specialist.core.Explorer bot;
     /** single-step mode (paused and stepping): only the last instruction lights up on the map */
     volatile boolean stepping;
 
@@ -177,6 +179,16 @@ final class EmuThread extends Thread {
             machine.setHistoryEnabled(machine.tapeInput == null);
             // ×2 / ×4 run two / four frames' worth per real frame (their sound squeezed into it);
             // slow speeds run a part of a frame, below 4 clocks per frame not every frame
+            com.alexspec.specialist.core.Explorer b = bot;
+            if (b != null) {
+                try {
+                    b.beforeFrame(machine);
+                } catch (Exception | Error e) {
+                    android.util.Log.e("Specialist", "bot failed", e);
+                    b.stop(machine);
+                    bot = null;
+                }
+            }
             owed += Specialist.CYCLES_PER_FRAME * sp;
             int samples = 0;
             if (owed >= 1) {

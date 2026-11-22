@@ -1,0 +1,11 @@
+# BUDI: заставка, музыка, пробел — первый этаж; герой — адрес на экране (0760 строка, 0761 = 90h + колонка)
+title=BUDI
+crc=c79f7712
+names=budi,buddy,будди
+game=budi.rks
+start=f 600,k SP 5,f 500
+hero=addr 0760 0761
+lives=rect 176 6 207 19
+score=rect 80 6 127 19
+fire=^,Q
+step=14

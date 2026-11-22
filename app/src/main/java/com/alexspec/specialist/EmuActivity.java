@@ -391,6 +391,95 @@ public final class EmuActivity extends Activity implements MainView.Host {
         view.configChanged();
     }
 
+    // ------------------------------------------------------------------ the explorer bot (SPEC-022)
+
+    /** game profiles from assets/bot */
+    private List<com.alexspec.specialist.core.Explorer.Profile> botProfiles() {
+        List<com.alexspec.specialist.core.Explorer.Profile> list = new ArrayList<>();
+        try {
+            String[] names = getAssets().list("bot");
+            if (names == null) return list;
+            java.util.Arrays.sort(names);
+            for (String n : names) {
+                try (java.io.InputStream in = getAssets().open("bot/" + n)) {
+                    java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                    byte[] b = new byte[4096];
+                    int r;
+                    while ((r = in.read(b)) > 0) bos.write(b, 0, r);
+                    list.add(com.alexspec.specialist.core.Explorer.Profile.parse(bos.toString("UTF-8")));
+                } catch (Exception e) {
+                    android.util.Log.e("Specialist", "bot profile " + n, e);
+                }
+            }
+        } catch (IOException e) {
+            android.util.Log.e("Specialist", "bot profiles", e);
+        }
+        return list;
+    }
+
+    private void showBot() {
+        com.alexspec.specialist.core.Explorer bot = emu.bot;
+        List<String> items = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        if (bot != null) {
+            com.alexspec.specialist.core.Explorer.View v = bot.view;
+            items.add("Выключить бота");
+            actions.add(() -> {
+                stopBot();
+                toast("Бот выключен");
+            });
+            String stat = "Он сейчас: потерь жизни " + bot.deaths + ", мест обошёл " + bot.placesVisited()
+                    + (v != null && v.speedX > 0 ? String.format(java.util.Locale.US, ", поиск ×%.0f", v.speedX) : "");
+            show(new AlertDialog.Builder(this).setTitle("Бот: " + bot.profile.title).setMessage(stat + "\n\nКоснёшься джойстика или кнопок — управляешь сам; через 2 с после того, как отпустишь, бот продолжит.")
+                    .setPositiveButton("Выключить", (d, w) -> {
+                        stopBot();
+                        toast("Бот выключен");
+                    })
+                    .setNegativeButton("Пусть играет", null));
+            return;
+        }
+        List<com.alexspec.specialist.core.Explorer.Profile> all = botProfiles();
+        List<com.alexspec.specialist.core.Explorer.Profile> order = new ArrayList<>();
+        for (com.alexspec.specialist.core.Explorer.Profile p : all) if (p.matches(program, programCrc)) order.add(p);
+        for (com.alexspec.specialist.core.Explorer.Profile p : all) if (!order.contains(p)) order.add(p);
+        if (order.isEmpty()) {
+            toast("Нет описаний игр для бота");
+            return;
+        }
+        String[] names = new String[order.size()];
+        for (int i = 0; i < names.length; i++) {
+            com.alexspec.specialist.core.Explorer.Profile p = order.get(i);
+            names[i] = (p.matches(program, programCrc) ? "✓ " : "") + p.title;
+        }
+        show(new AlertDialog.Builder(this)
+                .setTitle("Бот: какая это игра?")
+                .setItems(names, (d, w) -> startBot(order.get(w))));
+    }
+
+    private void startBot(com.alexspec.specialist.core.Explorer.Profile p) {
+        if (!machine.isRomLoaded()) {
+            toast("Нет ПЗУ");
+            return;
+        }
+        int threads = Math.max(1, Runtime.getRuntime().availableProcessors() - 1);
+        emu.post(() -> {
+            com.alexspec.specialist.core.Explorer old = emu.bot;
+            if (old != null) old.stop(machine);
+            emu.bot = new com.alexspec.specialist.core.Explorer(machine.romImage(), p, threads);
+        });
+        tapPaused = false;
+        updatePause();
+        toast("Бот играет в " + p.title + ". Зелёная линия — его план, голубые — что он пробовал, красные — где герой гибнет. Возьмёшь джойстик — играешь сам.");
+    }
+
+    private void stopBot() {
+        emu.post(() -> {
+            com.alexspec.specialist.core.Explorer b = emu.bot;
+            emu.bot = null;
+            if (b != null) b.stop(machine);
+        });
+    }
+
     // ------------------------------------------------------------------ pause
 
     /** Shows a dialog; emulation stays paused while any dialog is open. */
@@ -489,6 +578,9 @@ public final class EmuActivity extends Activity implements MainView.Host {
             });
             setProgram("");
         });
+        com.alexspec.specialist.core.Explorer bot = emu.bot;
+        items.add(bot != null ? "🤖  Бот играет: " + bot.profile.title + "…" : "🤖  Бот…");
+        actions.add(this::showBot);
         items.add("⚙️  Настройки…");
         actions.add(this::showSettings);
         items.add("🔧  Сменить ПЗУ…");
@@ -993,7 +1085,14 @@ public final class EmuActivity extends Activity implements MainView.Host {
         startActivityForResult(i, REQ_PROGRAM);
     }
 
+    /** CRC32 of the program last started from a file (the bot finds its game profile by it) */
+    private long programCrc = -1;
+
     private void runProgram(String name, byte[] data) {
+        java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+        crc.update(data);
+        programCrc = crc.getValue();
+        stopBot();
         emu.post(() -> {
             try {
                 machine.loadRks(data, true);
