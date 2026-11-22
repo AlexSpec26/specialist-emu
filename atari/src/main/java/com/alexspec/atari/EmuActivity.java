@@ -470,8 +470,13 @@ public final class EmuActivity extends Activity implements MainView.Host {
      */
     @Override
     public void onRewind() {
+        final boolean playing = !tapPaused;
         emu.postKeepScreen(() -> {
             double went = machine.backPlayer(5);
+            // playing: the player takes over at once (ATARI-BUG-002). Without this, the 5 s just
+            // gone back were replayed as recorded (as after steps back on pause) and the game
+            // played itself. On pause the recording stays for the step buttons until play resumes.
+            if (playing) machine.forgetFuture();
             ui.post(() -> {
                 if (went <= 0.05) view.showNote("⟲ дальше назад нельзя");
                 else view.showNote(String.format(Locale.ROOT, went < 4.95 ? "⟲ %.1f с — дальше нет" : "⟲ %.1f с", went)
