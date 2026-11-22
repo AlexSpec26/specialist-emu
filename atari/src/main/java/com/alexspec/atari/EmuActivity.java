@@ -17,6 +17,7 @@ import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import com.alexspec.atari.core.AtariMachine;
@@ -51,6 +52,8 @@ public final class EmuActivity extends Activity implements MainView.Host {
     private EmuThread emu;
     private AtariMachine machine;
     private MainView view;
+    private ScreenRenderer screenRenderer;
+    private android.opengl.GLSurfaceView glView;
     private SharedPreferences prefs;
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -79,9 +82,27 @@ public final class EmuActivity extends Activity implements MainView.Host {
         emu = new EmuThread(machine, () -> {
             MainView v = view;
             if (v != null) v.postInvalidateOnAnimation();
+            android.opengl.GLSurfaceView g = glView;
+            if (g != null) g.requestRender();
         });
         view = new MainView(this, emu, this);
-        setContentView(view);
+        // the picture goes through the phone's video chip (screen modes, magnifier), as in DOS 286,
+        // the Specialist and ZX (ATARI-008); MainView on top keeps the picture's place transparent
+        screenRenderer = new ScreenRenderer(this, emu, 0xFF000000);
+        glView = new android.opengl.GLSurfaceView(this);
+        glView.setEGLContextClientVersion(2);
+        glView.setRenderer(screenRenderer);
+        glView.setRenderMode(android.opengl.GLSurfaceView.RENDERMODE_WHEN_DIRTY);
+        view.screenRenderer = screenRenderer;
+        view.requestRender = glView::requestRender;
+        FrameLayout root = new FrameLayout(this);
+        root.addView(glView);
+        root.addView(view);
+        root.setOnApplyWindowInsetsListener((v, in) -> {
+            view.dispatchApplyWindowInsets(in);
+            return in;
+        });
+        setContentView(root);
         applySettings();
 
         migrateOldLibrary();
@@ -117,6 +138,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
     @Override
     protected void onResume() {
         super.onResume();
+        if (glView != null) glView.onResume();
         hideSystemBars();
         emu.setPaused(false);
     }
@@ -137,6 +159,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
             }
         });
         emu.setPaused(true);
+        if (glView != null) glView.onPause();
         super.onPause();
     }
 
@@ -351,6 +374,11 @@ public final class EmuActivity extends Activity implements MainView.Host {
         view.buttonCount = prefs.getInt("buttons", 3);
         view.joy8 = prefs.getBoolean("joy8", true);
         view.vibrate = prefs.getBoolean("vibrate", true);
+        // the screen (ATARI-008): the video chip draws the chosen tube; colour TV by default (as in
+        // ZX, the owner chose the "lamp" look there)
+        int mode = Math.max(0, Math.min(ScreenRenderer.MODE_NAMES.length - 1, prefs.getInt("screenMode", ScreenRenderer.MODE_COLOR_TV)));
+        screenRenderer.mode = mode;
+        if (glView != null) glView.requestRender();
         emu.sound = prefs.getBoolean("sound", true);
         int step = Math.max(0, Math.min(Speed.STEPS - 1, prefs.getInt("speedStep", Speed.REAL)));
         emu.speed = Speed.factor(step);
@@ -404,7 +432,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
         emu.setUserPaused(p);
         if (!p && emu.stepping) emu.stepping = false;
         if (!p) emu.post(machine::forgetFuture); // play goes on: live controls from here
-        view.paused = tapPaused || view.isPicking();
+        view.setPaused(tapPaused || view.isPicking());
         view.invalidate();
     }
 
@@ -432,6 +460,24 @@ public final class EmuActivity extends Activity implements MainView.Host {
                         "Дальше назад нельзя: история хранит %.0f с (после загрузки — с её момента)", Math.max(0, h))));
             }
             ui.post(view::showMachineInfo);
+        });
+    }
+
+    /**
+     * ⟲ 5 s (ATARI-008): back 5 seconds of the time the player lived through — at ×4 that is 20 s
+     * of the game, at 1/8 about 0,6 s; exactly to that moment, the recorded controls replayed.
+     * Works playing and paused (stays paused).
+     */
+    @Override
+    public void onRewind() {
+        emu.postKeepScreen(() -> {
+            double went = machine.backPlayer(5);
+            ui.post(() -> {
+                if (went <= 0.05) view.showNote("⟲ дальше назад нельзя");
+                else view.showNote(String.format(Locale.ROOT, went < 4.95 ? "⟲ %.1f с — дальше нет" : "⟲ %.1f с", went)
+                        .replace('.', ','));
+                if (tapPaused) view.showMachineInfo();
+            });
         });
     }
 
@@ -794,12 +840,20 @@ public final class EmuActivity extends Activity implements MainView.Host {
                         + "(повторное нажатие — отмена). Красным на клавише — символ с SHIFT, синим — с CTRL "
                         + "(CTRL + − = + * — стрелки курсора). Λ — инверсия, CAPS — регистр букв. В верхнем ряду — "
                         + "консольные клавиши HELP, START, SELECT, OPTION, RESET и BREAK.\n\n"
+                        + "⟲ 5 с — назад на 5 секунд того времени, что вы прожили, при любой скорости: при ×4 это "
+                        + "20 секунд игры, при замедлении в 8 раз — около 0,6 с. Ровно на тот момент, с теми же "
+                        + "нажатиями. Можно нажимать подряд, пока хватает истории (минута игры).\n\n"
                         + "Пауза: нажмите на экран — посреди экрана появится маленький знак паузы. В паузе вместо названия программы (сбоку от экрана, если телефон лежит) — кнопки: на секунду и на одну команду "
-                        + "назад и вперёд. После шага 4 секунды видны луч и текущая команда процессора с регистрами (под панелью, вне картинки). "
+                        + "назад и вперёд. После шага 4 секунды видны текущая команда процессора с регистрами и где луч "
+                        + "(под панелью, вне картинки; красные метки на краю картинки показывают луч). "
+                        + "На паузе картинку можно разглядывать: два пальца — лупа до ×24, один — двигать. "
                         + "Назад можно уйти на минуту; вперёд после этого повторяется то, что было, пока "
                         + "не продолжите игру. При шагах по одной команде на карте памяти светится только эта "
                         + "команда. Пока открыто меню, эмуляция тоже стоит.\n\n"
-                        + "Сохранения: у каждой программы своё. Значок 💾 в списках — у программы есть сохранение.\n\n"
+                        + "Сохранения: у каждой программы своё, вместе с минутой истории — после загрузки ⟲ тоже работает. "
+                        + "Значок 💾 в списках — у программы есть сохранение.\n\n"
+                        + "Экран: «Настройки» → «Экран» — цветной телевизор (по умолчанию), чёрно-белый телевизор, "
+                        + "чёткие пиксели, зелёный и янтарный мониторы.\n\n"
                         + "Скорость: от ×4 до 1 такта в секунду, каждый шаг ползунка — вдвое.\n\n"
                         + "Визуализация памяти: карта всех 64 КБ под экраном, байты вспыхивают при чтении, записи "
                         + "и исполнении процессором; тап по карте — что это за адрес; есть экскурсия.\n\n"
@@ -842,13 +896,14 @@ public final class EmuActivity extends Activity implements MainView.Host {
             "Джойстик: " + (view.joy8 ? "8 направлений" : "4 направления"),
             "Звук: " + (emu.sound ? "вкл" : "выкл"),
             "Вибрация: " + (view.vibrate ? "вкл" : "выкл"),
+            "Экран: " + ScreenRenderer.MODE_NAMES[screenRenderer.mode],
         };
         show(new AlertDialog.Builder(this)
                 .setTitle("Настройки")
                 .setItems(items, (d, which) -> {
                     switch (which) {
                         case 0: {
-                            String[] counts = {"1", "2", "3", "4"};
+                            String[] counts = {"1", "2", "3", "4", "5", "6", "7", "8"};
                             show(new AlertDialog.Builder(this)
                                     .setTitle("Кнопок справа")
                                     .setSingleChoiceItems(counts, view.buttonCount - 1, (d2, w) -> {
@@ -865,9 +920,20 @@ public final class EmuActivity extends Activity implements MainView.Host {
                         case 2:
                             prefs.edit().putBoolean("sound", !emu.sound).apply();
                             break;
-                        default:
+                        case 3:
                             prefs.edit().putBoolean("vibrate", !view.vibrate).apply();
                             break;
+                        default: {
+                            show(new AlertDialog.Builder(this)
+                                    .setTitle("Экран")
+                                    .setSingleChoiceItems(ScreenRenderer.MODE_NAMES, screenRenderer.mode, (d2, w) -> {
+                                        prefs.edit().putInt("screenMode", w).apply();
+                                        d2.dismiss();
+                                        applySettings();
+                                        showSettings();
+                                    }));
+                            return;
+                        }
                     }
                     applySettings();
                     showSettings();
