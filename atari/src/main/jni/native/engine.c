@@ -24,6 +24,8 @@
 #include "cartridge.h"
 #include "cassette.h"
 #include "binload.h"
+#include "gtia.h"
+#include "pokey.h"
 #include "sysrom.h"
 #include <stdio.h>
 #include <string.h>
@@ -338,20 +340,61 @@ void engine_reset(void) {
 
 #define STATE_MAGIC 0x41545331 /* "ATS1" */
 
-size_t engine_snapshot_size(void) { return loaded ? 8 * sizeof(int) + retro_serialize_size() : 0; }
+/* Before the core's own state, what its save state leaves out: 8 ints of input.c (keys and sticks
+ * between frames), 11 of the XEX loader (binload.c, with its ESC entry), the pot scan counter
+ * (pokey.c), the 4 trigger inputs of GTIA, and the boot-time console override (OPTION held to
+ * switch BASIC off, START for a cassette boot; the core's state load sets it to 0) with the
+ * cassette boot flags. Saves from before ATARI-008 have only the 8 (LEGACY_EXTRA). */
+#define EXTRA_INTS 27
+#define LEGACY_EXTRA 8
+
+/* then the serial transfer in progress (sio.c), padded to whole ints */
+#define SIO_BYTES ((SIO_ALEX_STATE_SIZE + 3) / 4 * 4)
+#define EXTRA_BYTES (EXTRA_INTS * sizeof(int) + SIO_BYTES)
+#define LEGACY_BYTES (LEGACY_EXTRA * sizeof(int))
+
+size_t engine_snapshot_extra(void) { return EXTRA_BYTES; }
+
+size_t engine_snapshot_size(void) { return loaded ? EXTRA_BYTES + retro_serialize_size() : 0; }
 
 int engine_snapshot_save(void *data, size_t size) {
     if (!loaded || size < engine_snapshot_size()) return 0;
-    INPUT_AlexGetState((int *)data);
-    return retro_serialize((char *)data + 8 * sizeof(int), size - 8 * sizeof(int));
+    int *x = (int *)data;
+    INPUT_AlexGetState(x);
+    BINLOAD_AlexGetState(x + 8);
+    x[19] = POKEY_AlexGetPotScanline();
+    for (int i = 0; i < 4; i++) x[20 + i] = GTIA_TRIG[i];
+    x[24] = GTIA_consol_override;
+    x[25] = CASSETTE_hold_start;
+    x[26] = CASSETTE_press_space;
+    memset((char *)data + EXTRA_INTS * sizeof(int), 0, SIO_BYTES);
+    SIO_AlexGetState((unsigned char *)data + EXTRA_INTS * sizeof(int));
+    return retro_serialize((char *)data + EXTRA_BYTES, size - EXTRA_BYTES);
 }
 
-int engine_snapshot_load(const void *data, size_t size) {
-    if (!loaded || size < engine_snapshot_size()) return 0;
-    if (!retro_unserialize((const char *)data + 8 * sizeof(int), size - 8 * sizeof(int))) return 0;
-    INPUT_AlexSetState((const int *)data);
+/* extra: EXTRA_BYTES, or LEGACY_BYTES for a save from before ATARI-008 */
+static int snapshot_load_extra(const void *data, size_t size, size_t extra) {
+    if (!loaded || size < extra + retro_serialize_size()) return 0;
+    if (!retro_unserialize((const char *)data + extra, size - extra)) return 0;
+    const int *x = (const int *)data;
+    INPUT_AlexSetState(x);
+    if (extra >= EXTRA_BYTES) {
+        BINLOAD_AlexSetState(x + 8, game_path);
+        POKEY_AlexSetPotScanline(x[19]);
+        for (int i = 0; i < 4; i++) GTIA_TRIG[i] = (UBYTE)x[20 + i];
+        GTIA_consol_override = x[24];
+        CASSETTE_hold_start = x[25];
+        CASSETTE_press_space = x[26];
+        SIO_AlexSetState((const unsigned char *)data + EXTRA_INTS * sizeof(int));
+    } else {
+        /* an old save: the program had been loaded long before */
+        static const int done[11] = {-1, 0, 0, 0, 0, 0, 0, 1, 0, 0, -1};
+        BINLOAD_AlexSetState(done, NULL);
+    }
     return 1;
 }
+
+int engine_snapshot_load(const void *data, size_t size) { return snapshot_load_extra(data, size, EXTRA_BYTES); }
 
 size_t engine_state_size(void) { return loaded ? 4 + engine_snapshot_size() : 0; }
 
@@ -367,12 +410,70 @@ int engine_save(void *data, size_t size) {
     return engine_snapshot_save((char *)data + 4, size - 4);
 }
 
+/* ---- saves with history (ATARI-008): "ATS2", u32 payload length, zlib(payload of timeline.c) ---- */
+
+#define STATE2_MAGIC 0x41545332 /* "ATS2" */
+
+/* The system zlib (-lz). Not through <zlib.h>: the include path finds libretro-common's copy
+ * first, which declares the length arguments as uint32_t *, while the library writes an
+ * unsigned long (8 bytes on the 64-bit phones). These are zlib's real prototypes. */
+extern int compress2(unsigned char *dest, unsigned long *dest_len, const unsigned char *src,
+                     unsigned long src_len, int level);
+extern int uncompress(unsigned char *dest, unsigned long *dest_len, const unsigned char *src,
+                      unsigned long src_len);
+extern unsigned long compressBound(unsigned long src_len);
+#define ZIP_OK 0
+#define STATE2_MAX (256u << 20)
+
+void *engine_save_history(size_t *size) {
+    *size = 0;
+    if (!loaded) return NULL;
+    size_t raw_len;
+    void *raw = timeline_save_payload(&raw_len);
+    if (!raw) return NULL;
+    unsigned long zlen = compressBound(raw_len);
+    unsigned char *out = malloc(8 + zlen);
+    if (!out || raw_len > STATE2_MAX || compress2(out + 8, &zlen, raw, raw_len, 6) != ZIP_OK) {
+        free(raw);
+        free(out);
+        return NULL;
+    }
+    free(raw);
+    uint32_t magic = STATE2_MAGIC, len = (uint32_t)raw_len;
+    memcpy(out, &magic, 4);
+    memcpy(out + 4, &len, 4);
+    *size = 8 + zlen;
+    return out;
+}
+
+static int load_history(const unsigned char *data, size_t size) {
+    uint32_t len;
+    if (size < 9) return 0;
+    memcpy(&len, data + 4, 4);
+    if (len < 16 || len > STATE2_MAX) return 0;
+    unsigned char *raw = malloc(len);
+    if (!raw) return 0;
+    unsigned long got = len;
+    int ok = uncompress(raw, &got, data + 8, size - 8) == ZIP_OK && got == len
+            && timeline_load_payload(raw, len);
+    free(raw);
+    return ok;
+}
+
+/* Loads a save: with history ("ATS2", ATARI-008) or an older one without ("ATS1"). A damaged file
+ * or one from another machine (a different snapshot size) is refused before the machine changes. */
 int engine_load(const void *data, size_t size) {
     uint32_t magic;
-    if (!loaded || size != engine_state_size()) return 0;
-    timeline_leave_frame();
+    if (!loaded || size < 4) return 0;
     memcpy(&magic, data, 4);
-    if (magic != STATE_MAGIC || !engine_snapshot_load((const char *)data + 4, size - 4)) return 0;
+    if (magic == STATE2_MAGIC) return load_history(data, size);
+    if (magic != STATE_MAGIC) return 0;
+    size_t extra;
+    if (size == engine_state_size()) extra = EXTRA_BYTES;
+    else if (size == 4 + LEGACY_BYTES + retro_serialize_size()) extra = LEGACY_BYTES;
+    else return 0;
+    timeline_leave_frame();
+    if (!snapshot_load_extra((const char *)data + 4, size - 4, extra)) return 0;
     timeline_reset();
     return 1;
 }

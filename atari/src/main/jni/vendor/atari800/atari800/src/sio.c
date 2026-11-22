@@ -2036,3 +2036,41 @@ void Retro_SIO_StateRead(void)
 	}
 }
 #endif /* __LIBRETRO__ */
+
+/* AlexSpec (atari/THIRD_PARTY.md): the serial transfer in progress, which the core's save state
+   leaves out, so the app's snapshots (rewind, saves) taken while a program loads over SIO
+   continue it exactly. The data buffer is kept up to SIO_ALEX_BUFFER bytes (sectors are at most
+   512 bytes; only FujiNet's large frames would not fit). */
+void SIO_AlexGetState(unsigned char *out)
+{
+	int v[6];
+	v[0] = CommandIndex;
+	v[1] = DataIndex;
+	v[2] = TransferStatus;
+	v[3] = ExpectedBytes;
+#ifndef NO_SECTOR_DELAY
+	v[4] = delay_counter;
+	v[5] = last_ypos;
+#else
+	v[4] = v[5] = 0;
+#endif
+	memcpy(out, v, sizeof v);
+	memcpy(out + sizeof v, CommandFrame, sizeof CommandFrame);
+	memcpy(out + sizeof v + sizeof CommandFrame, DataBuffer, SIO_ALEX_BUFFER);
+}
+
+void SIO_AlexSetState(const unsigned char *in)
+{
+	int v[6];
+	memcpy(v, in, sizeof v);
+	CommandIndex = v[0];
+	DataIndex = v[1];
+	TransferStatus = v[2];
+	ExpectedBytes = v[3];
+#ifndef NO_SECTOR_DELAY
+	delay_counter = v[4];
+	last_ypos = v[5];
+#endif
+	memcpy(CommandFrame, in + sizeof v, sizeof CommandFrame);
+	memcpy(DataBuffer, in + sizeof v + sizeof CommandFrame, SIO_ALEX_BUFFER);
+}

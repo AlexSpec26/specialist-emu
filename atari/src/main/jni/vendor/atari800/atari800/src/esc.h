@@ -88,6 +88,9 @@ void ESC_AddEscRts(UWORD address, UBYTE esc_code, ESC_FunctionType function);
 void ESC_AddEscRts2(UWORD address, UBYTE esc_code, ESC_FunctionType function);
 
 /* Unregisters an escape sequence. You must cleanup the Atari memory yourself. */
+/* AlexSpec: one table entry for snapshots (see esc.c) */
+int ESC_AlexGet(UBYTE esc_code);
+void ESC_AlexSet(UBYTE esc_code, int address, ESC_FunctionType function);
 void ESC_Remove(UBYTE esc_code);
 
 /* Handles an escape sequence. */

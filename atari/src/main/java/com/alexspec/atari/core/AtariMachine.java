@@ -184,6 +184,37 @@ public final class AtariMachine implements MemTrace.Mem {
         return open ? (float) NativeAtari.historySeconds() : 0;
     }
 
+    /**
+     * Player's seconds per emulated cycle (ATARI-008, as in ZX): 1 / CPU_HZ at real speed, a
+     * quarter of it at x4, more in slow motion. Set by the emulation thread from the speed; the
+     * engine logs every change with its exact cycle.
+     */
+    public void setPlayerRate(double secondsPerCycle) {
+        if (open) NativeAtari.setPlayerRate(secondsPerCycle);
+    }
+
+    /**
+     * ⟲: back {@code sec} seconds of the player's clock — the time the player lived through,
+     * whatever the speed was — exactly to that moment (an instruction boundary), replaying the
+     * recorded controls. Returns the seconds actually gone back (less if the history is shorter).
+     */
+    public double backPlayer(double sec) {
+        if (!open) return 0;
+        double went = NativeAtari.backPlayer(sec);
+        refresh();
+        return went;
+    }
+
+    /** the player's clock, seconds */
+    public double playerTime() {
+        return open ? NativeAtari.playerTime() : 0;
+    }
+
+    /** seconds of the player's clock the history reaches back */
+    public double historyPlayerSeconds() {
+        return open ? NativeAtari.historyPlayerSeconds() : 0;
+    }
+
     /** Re-reads the picture, memory and registers from the engine. */
     public void refresh() {
         if (!open) return;
@@ -260,6 +291,7 @@ public final class AtariMachine implements MemTrace.Mem {
 
     // ------------------------------------------------------------------ state
 
+    /** The machine with the last minute of history (ATARI-008), compressed; null on failure. */
     public byte[] saveState() {
         if (!open) return null;
         byte[] s = NativeAtari.save();

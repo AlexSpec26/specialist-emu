@@ -29,6 +29,17 @@ Local modifications to vendored source:
 - `atari800/src/input.c`: the key/joystick state that `INPUT_Frame` keeps between frames is
   moved from function-static to file-static variables with `INPUT_AlexGetState` /
   `INPUT_AlexSetState`, so replays from snapshots are exact.
+- ATARI-008 (rewind into program loading, saves loaded right after opening a program): what the
+  core's save state leaves out is added to the app's snapshots through small accessors, without
+  changing the core's behaviour —
+  `atari800/src/binload.c`/`.h` `BINLOAD_AlexGetState` / `BINLOAD_AlexSetState` (the XEX
+  loader's file position and progress); `atari800/src/esc.c`/`.h` `ESC_AlexGet` /
+  `ESC_AlexSet` (one ESC table entry without touching memory: where the loader continues);
+  `atari800/src/sio.c`/`.h` `SIO_AlexGetState` / `SIO_AlexSetState` (the serial transfer in
+  progress: command frame, data buffer up to 1027 bytes, counters); `atari800/src/pokey.c`/`.h`
+  `POKEY_AlexGetPotScanline` / `POKEY_AlexSetPotScanline` (the pot scan counter). GTIA's
+  trigger inputs and the boot-time console override (which the core's state load resets) are
+  global already and saved by `native/engine.c`.
 
 The Atari frontend (engine.c, timeline.c, jni.c), the Android application and the tests are
 original additions; the Android screens are ported from this repository's ZX Spectrum app. The release

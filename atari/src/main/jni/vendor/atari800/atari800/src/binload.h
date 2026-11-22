@@ -27,5 +27,8 @@ extern int BINLOAD_pause_loading;
 #define BINLOAD_LOADING_BASIC_LISTED_CRLF        6
 #define BINLOAD_LOADING_BASIC_RUN                7
 int BINLOAD_LoaderStart(UBYTE *buffer);
+/* AlexSpec: the loader's state in snapshots (see binload.c) */
+void BINLOAD_AlexGetState(int out[11]);
+int BINLOAD_AlexSetState(const int in[11], const char *path);
 
 #endif /* BINLOAD_H_ */

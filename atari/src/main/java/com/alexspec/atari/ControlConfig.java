@@ -11,19 +11,22 @@ import com.alexspec.atari.core.AtariMachine;
 final class ControlConfig {
     static final int UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3;
     static final int BUTTON0 = 4;
-    static final int MAX_BUTTONS = 4;
+    static final int MAX_BUTTONS = 8;
     static final int SLOTS = BUTTON0 + MAX_BUTTONS;
     static final String DEFAULT_PROFILE = "";
 
     static final String[] SLOT_NAMES = {
         "Джойстик ↑", "Джойстик ↓", "Джойстик ←", "Джойстик →",
         "Кнопка 1", "Кнопка 2", "Кнопка 3", "Кнопка 4",
+        "Кнопка 5", "Кнопка 6", "Кнопка 7", "Кнопка 8",
     };
+    /** buttons 5-8 (ATARI-008; layouts and games only name 1-4): SELECT, OPTION, the keys 1 and 2 */
+    private static final int[] EXTRA = {AtariMachine.SELECT, AtariMachine.OPTION, 0x1F, 0x1E};
 
     private static final int U = AtariMachine.JOY_UP, D = AtariMachine.JOY_DOWN, L = AtariMachine.JOY_LEFT,
             R = AtariMachine.JOY_RIGHT, F = AtariMachine.FIRE;
 
-    /** ready-made layouts: name, then up, down, left, right, button 1..4 */
+    /** ready-made layouts: name, then up, down, left, right, button 1..4 (5..8 from EXTRA) */
     static final String[] PRESET_NAMES = {
         "Джойстик: огонь, START, пробел, RETURN",
         "Джойстик: огонь, START, SELECT, OPTION",
@@ -51,13 +54,19 @@ final class ControlConfig {
     }
 
     void set(int preset) {
-        System.arraycopy(PRESETS[preset], 0, keys, 0, SLOTS);
+        fill(PRESETS[preset]);
         ctrlArrows = PRESET_CTRL[preset];
     }
 
     void set(int[] layout) {
-        System.arraycopy(layout, 0, keys, 0, SLOTS);
+        fill(layout);
         ctrlArrows = false;
+    }
+
+    private void fill(int[] layout) {
+        int n = Math.min(layout.length, SLOTS);
+        System.arraycopy(layout, 0, keys, 0, n);
+        for (int i = n; i < SLOTS; i++) keys[i] = EXTRA[i - BUTTON0 - 4];
     }
 
     private static String prefKey(String profile) {
@@ -80,15 +89,19 @@ final class ControlConfig {
         }
         if (s == null && !DEFAULT_PROFILE.equals(profile)) s = p.getString(prefKey(DEFAULT_PROFILE), null);
         if (s != null) {
+            // keys, then the CONTROL flag "c" / "-"; saves from before ATARI-008 have 4 buttons,
+            // so their flag comes earlier and buttons 5-8 keep the defaults
             String[] parts = s.split(",");
             for (int i = 0; i < SLOTS && i < parts.length; i++) {
+                String t = parts[i].trim();
+                if (t.equals("c") || t.equals("-")) break;
                 try {
-                    int v = Integer.parseInt(parts[i].trim());
+                    int v = Integer.parseInt(t);
                     c.keys[i] = (v >= AtariKeys.NONE && v < AtariKeys.COUNT) ? v : AtariKeys.NONE;
                 } catch (NumberFormatException ignored) {
                 }
             }
-            c.ctrlArrows = parts.length > SLOTS && "c".equals(parts[SLOTS].trim());
+            c.ctrlArrows = parts.length > 0 && "c".equals(parts[parts.length - 1].trim());
         }
         return c;
     }

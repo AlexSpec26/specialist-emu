@@ -14,7 +14,7 @@ zx/         ZX: Android-приложение ZX Spectrum 48K (com.alexspec.zx)
   assets/   48k.rom, games/*.tap|tzx + LICENSE.txt
 atari/      ATARI: Android-приложение Atari 65XE (com.alexspec.atari), подробно — atari/README.md
   java/     как в zx (EmuActivity, MainView, MapPanel, EmuThread…) + AtariKeys, Games, Tutorial;
-            core/: AtariMachine, NativeAtari, MemTrace, Dis6502
+            core/: AtariMachine, NativeAtari, MemTrace, Dis6502; ScreenRenderer (экран через GLES 2)
   jni/      native/engine.c (libretro-фронтенд), timeline.c (время, шаги, карта), jni.c (мост),
             vendor/atari800 (ядро)
 dos/        DOS: Android-приложение «DOS 286» (com.alexspec.dos), подробно — dos/README.md
@@ -104,7 +104,11 @@ docs/       i8080-tutorial.html (DOC-001), handoffs/ (старые переда�
   картинка 336×240 из `Screen_atari`; снимок = save state ядра + состояние ввода из input.c.
 - `timeline.c` — время (ADR-023): хук перед каждой командой считает команды и такты, отмечает
   обращения (карта) и по запросу выходит из ядра `longjmp`; продолжение — снимок начала кадра +
-  повтор; кольцо снимков каждые 10 кадров (10 с), журнал органов управления по кадрам.
+  повтор; кольцо снимков каждые 25 кадров (62 с), журнал органов управления по кадрам; часы игрока
+  с журналом смен скорости и ⟲ N с; сохранение «ATS2» с минутой истории (ADR-032).
+- Снимок = состояние ядра + то, чего ядро не сохраняет (клавиши между кадрами, загрузчик XEX и его
+  запись ESC, обмен SIO, счётчик POT, кнопки GTIA, удержание OPTION/START при старте) — `engine.c`.
+- Экран: `ScreenRenderer` (GLES 2) + `assets/screen.frag` — как в ZX; MainView прозрачен в месте картинки.
 - Java: `core/AtariMachine` (интерфейс как у `Spectrum48`), экраны — порт из `zx/`
   (EmuActivity, MainView, MapPanel, EmuThread, ControlConfig, Speed), свои AtariKeys, Games,
   Tutorial, `core/Dis6502`. Все вызовы ядра — из потока эмуляции.

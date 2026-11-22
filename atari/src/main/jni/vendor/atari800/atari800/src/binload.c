@@ -222,3 +222,50 @@ int BINLOAD_Loader(const char *filename)
 	Log_print("binload: \"%s\" not recognized as a DOS or BASIC program", filename);
 	return FALSE;
 }
+
+/* AlexSpec (atari/THIRD_PARTY.md): the loader's progress as plain numbers, so the app's snapshots
+   (rewind, saves) include it. Without it, a snapshot taken while a program was loading, or a
+   save loaded right after opening a program, would leave the loader in another state than the
+   machine's memory and the game would later go its own way. `path` is the file being loaded
+   (needed when the snapshot was taken while it was open and the file has been closed since).
+   The loader also keeps where it continues in the ESC table (esc.c), so that goes with it. */
+void BINLOAD_AlexGetState(int out[11])
+{
+	out[0] = BINLOAD_bin_file ? (int) ftell(BINLOAD_bin_file) : -1;
+	out[1] = BINLOAD_start_binloading;
+	out[2] = BINLOAD_loading_basic;
+	out[3] = BINLOAD_wait_active;
+	out[4] = from;
+	out[5] = to;
+	out[6] = init2e3;
+	out[7] = segfinished;
+	out[8] = (int) instr_elapsed;
+	out[9] = BINLOAD_pause_loading;
+	out[10] = ESC_AlexGet(ESC_BINLOADER_CONT); /* where the loader continues (it moves with the stack) */
+}
+
+int BINLOAD_AlexSetState(const int in[11], const char *path)
+{
+	if (in[0] < 0) {
+		if (BINLOAD_bin_file) fclose(BINLOAD_bin_file);
+		BINLOAD_bin_file = NULL;
+	} else {
+		if (!BINLOAD_bin_file) {
+			if (!path || !*path) return 0;
+			BINLOAD_bin_file = fopen(path, "rb");
+			if (!BINLOAD_bin_file) return 0;
+		}
+		if (fseek(BINLOAD_bin_file, in[0], SEEK_SET) != 0) return 0;
+	}
+	BINLOAD_start_binloading = in[1];
+	BINLOAD_loading_basic = in[2];
+	BINLOAD_wait_active = in[3];
+	from = (UWORD) in[4];
+	to = (UWORD) in[5];
+	init2e3 = in[6];
+	segfinished = in[7];
+	instr_elapsed = (unsigned int) in[8];
+	BINLOAD_pause_loading = in[9];
+	ESC_AlexSet(ESC_BINLOADER_CONT, in[10], loader_cont);
+	return 1;
+}

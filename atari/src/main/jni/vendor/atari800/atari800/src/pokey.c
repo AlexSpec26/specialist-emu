@@ -807,6 +807,12 @@ static void Update_Counter(int chan_mask)
 
 #ifndef BASIC
 
+/* AlexSpec (atari/THIRD_PARTY.md): the pot (paddle) scan counter is not in the core's save state;
+   the OS reads the pots every frame, so without it a replay from a snapshot taken before the OS
+   restarts the scan (while booting) differs from the original. */
+int POKEY_AlexGetPotScanline(void) { return pot_scanline; }
+void POKEY_AlexSetPotScanline(int v) { pot_scanline = v; }
+
 void POKEY_StateSave(void)
 {
 	int shift_key = 0;

@@ -1,42 +1,49 @@
 # Current handoff
-- Updated at (UTC): 2026-11-20
-- Outgoing agent: Claude «Синклер» (Claude Code, облачная сессия; отвечает только за ZX — `zx/`)
-- Branch: `claude/zx-standard`
-- Last pushed commit: см. `git log -1 origin/claude/zx-standard`
-- Open PR: нет; PR #26 влит (9e2658d), релиз **zx-build-17** (`zx-spectrum-17.apk`, CI зелёный)
-- Active backlog IDs: ZX-016 (Review)
-- User-approved goal for this session: «В этой ветке мы сфокусируемся на эмуляторе ZX Spectrum … остальные
-  ветки рассматриваем только для заимствования элементов интерфейса». Задача: «привести к общему стандарту —
-  перемотка назад на 5 секунд РЕАЛЬНОГО времени, нормальный джойстик, убрать курсор с экрана, добавить телевизоры
-  и пиксели»; уточнения: курсор = красное перекрестие, «ламповый» экран по умолчанию, история в сохранении.
+- Updated at (UTC): 2026-11-22
+- Outgoing agent: Claude «Майнер» (Claude Code, облачная сессия; отвечает только за Atari — `atari/`, `tools/Atari*`)
+- Branch: `claude/atari-standard`
+- Last pushed commit: см. `git log -1 origin/claude/atari-standard`
+- Open PR: #28 (ATARI-008); после слияния в main — релиз `atari-build-N` (`atari-65xe-N.apk`)
+- Active backlog IDs: ATARI-008 (Review)
+- User-approved goal for this session: «В этой ветке мы сфокусируемся на эмуляторе Atari, ты будешь отвечать за
+  него … остальные ветки рассматриваем только для заимствования элементов интерфейса». Задача: «Atari надо
+  привести к "общему стандарту" - чтобы перемотка назад на 5 секунд РЕАЛЬНОГО времени, нормальный джойстик,
+  убрать курсор с экрана, добавить телевизоры и пиксели и т.д.»; на план — «давай». Уточнения взяты из ответов
+  владельца для ZX (курсор = красное перекрестие, ламповый экран по умолчанию, история в сохранении).
 
 ## Другие продукты
-- Предыдущая передача (DOS 286, SPEC-021, DOS-BUG-002) — `docs/handoffs/2026-11-17-claude-dos.md`. Расхождение,
-  найденное при старте: в ней PR #18 значился открытым, а в main уже влиты #18–#25 (DOS-002…008, DOS-BUG-002,
-  SPEC-021). Их вопросы к владельцу (DOS-BUG-001, ROM-Q1/Q2, старые предрелизы atari) — там, не закрыты.
+- Предыдущая передача (ZX «Синклер», ZX-016) — `docs/handoffs/2026-11-20-claude-zx.md`; её вопрос (хватает ли 62 с
+  игры для ⟲ при ×4) относится и к Atari. Более ранние — там же.
 
 ## What changed and why
-- ZX-016 / ADR-031: часы игрока в ядре (`Spectrum48.playerRate`, EmuThread задаёт из скорости), `backPlayer(5)` —
-  ровно на 5 с назад повтором от снимка; кнопка ⟲ 5 с на панели; сохранения v2 с минутой истории (сжато, ~1 МБ).
-- Экран через видеочип (порт SPEC-021): режимы, цветной ТВ по умолчанию, лупа на паузе; плавающий джойстик,
-  1–8 кнопок; перекрестие луча убрано, скорость/кассета в панели.
+- ATARI-008 / ADR-032: часы игрока в `timeline.c` с журналом смен скорости (EmuThread задаёт секунды игрока на
+  такт); `engine_back_player(5)` — ровно на 5 с назад даже при смене скорости; кнопка ⟲ 5 с; сохранение «ATS2»
+  с минутой истории (zlib, ~2 МБ), «ATS1» читается.
+- Снимки дополнены тем, что ядро не сохраняет (загрузчик XEX + ESC, SIO, POT, GTIA_TRIG, удержание OPTION):
+  без этого перемотка в начало программы и загрузка сохранения сразу после открытия расходились (нашёл новый тест).
+- Экран через видеочип (ScreenRenderer + screen.frag из ZX), лупа; плавающий джойстик, 1–8 кнопок; без
+  перекрестия; скорость и заметка ⟲ в панели.
 
 ## Verified results
-- Commands executed: `javac -d /tmp/zt zx/src/main/java/com/alexspec/zx/core/*.java tools/ZxTimeTest.java &&
-  java -cp /tmp/zt ZxTimeTest zx/src/main/assets/48k.rom "zx/src/main/assets/games/Sir Ababol.tzx"`;
-  шейдер — moderngl/EGL (llvmpipe) на кадре Sir Ababol 320×256, 1440×1152, режимы 0/2/3/4/5 и лупа ×8.
-- Passed: HISTORY 61,9 s, KEY REPLAY, STEP, PLAYER CLOCK ×1/×4/1⁄8, SAVE WITH HISTORY (1138 КБ), OLD AND BROKEN FILES.
-- Not run: сборка APK локально (нет Android SDK, сеть к Google закрыта) — делает CI на PR #26; на телефоне ничего.
+- Commands executed: `python3 atari/tools/make_demo.py && python3 atari/tools/make_notices.py`;
+  `ASAN_OPTIONS=detect_leaks=0 make -s -f atari/src/main/jni/Makefile.host test EXTRA_CFLAGS="-O0 -fsanitize=address -g -fno-omit-frame-pointer" DEMO=$PWD/atari/src/main/assets/demos/catch-the-star.xex`;
+  `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 make -s -f atari/src/main/jni/Makefile.host jni-test DEMO=...`;
+  шейдер — moderngl/EGL (llvmpipe) на кадрах 336×240, режимы 0/2/3/4/5 и лупа ×8.
+- Passed: все проверки AtariNativeTest (в т. ч. новый PLAYER CLOCK…), AtariJniTest; CI PR #28 (сборка APK).
+- Not run: на телефоне ничего; Android-часть компилирует только CI (локально нет SDK, Maven закрыт).
 
 ## Known problems and risks
-- История — 62 с игры: при ×4 ⟲ 5 с можно нажать ~3 раза.
-- Если видеочип не поднялся (шейдер не собрался) — картинка рисуется по-старому, без режимов и ч/б.
-- Раскладка на телефоне не проверена: ⟲ на панели рядом с ☰, кнопки шагов на паузе сузились (между ⟲ и ⌨).
+- История — 62 с игры: при ×4 ⟲ 5 с можно нажать ~3 раза (как в ZX).
+- Буфер SIO в снимке — до 1027 байт (большие кадры FujiNet — нет). Диск ATR снимки не откатывают (как раньше).
+- Раскладка на телефоне не проверена: ⟲ на панели рядом с ☰, в горизонтали — под ☰; кнопки шагов сузились.
+- Если видеочип не поднялся (шейдер не собрался) — картинка рисуется по-старому, без режимов и лупы.
 
 ## Exact next steps (ordered)
-1. Сделано: PR #26 влит, релиз zx-build-17.
-2. Владелец: ⟲ 5 с при ×1, ×4 и замедлении; сохранить → выйти → загрузить → ⟲; экран (цветной ТВ, лупа); джойстик.
-3. По отзывам — правки ZX-016.
+1. Слить PR #28 → релиз atari-build-N (CI на main подписывает).
+2. Владелец: ⟲ 5 с при ×1, ×4 и замедлении; сохранить → выйти → загрузить → ⟲; экран (цветной ТВ, лупа);
+   джойстик и кнопки 5–8; River Raid и любимые игры.
+3. По отзывам — правки ATARI-008.
 
 ## Questions requiring the user's approval
-- Хватает ли 62 с игры (при ×4 — ~15 с реального времени) или увеличить историю?
+- Устраивают ли для Atari те же решения, что для ZX (перекрестие убрано, цветной ТВ по умолчанию, минута истории)?
+- Кнопки 5–8 по умолчанию — SELECT, OPTION, 1, 2: подходит?

@@ -65,6 +65,11 @@ void SIO_StateRead(void);
 
 #if defined(__LIBRETRO__)
 void Retro_SIO_StateSave(void);
+/* AlexSpec: the serial transfer in progress, for snapshots (see sio.c) */
+#define SIO_ALEX_BUFFER 1027
+#define SIO_ALEX_STATE_SIZE (6 * 4 + 6 + SIO_ALEX_BUFFER)
+void SIO_AlexGetState(unsigned char *out);
+void SIO_AlexSetState(const unsigned char *in);
 void Retro_SIO_StateRead(void);
 #endif
 #endif	/* SIO_H_ */
