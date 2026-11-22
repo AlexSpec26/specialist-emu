@@ -79,6 +79,22 @@ public final class AtariJniTest {
         check(Math.abs(went - 5) < 1e-3, "back 5 s at x4 (" + went + ")");
         long gone = tx4 - m.time();
         check(Math.abs(gone - 20L * AtariMachine.CPU_HZ) < 200, "x4: 20 s of the machine (" + gone + ")");
+        // ⟲ while playing, then forgetFuture (as EmuActivity does): the live joystick moves the
+        // player at once, not the recorded one (ATARI-BUG-002)
+        {
+            m.forgetFuture();
+            int x0 = m.rawRead(0x81);
+            m.keyDown(AtariMachine.JOY_RIGHT);
+            for (int i = 0; i < 100; i++) m.runFrame(audio);
+            m.keyUp(AtariMachine.JOY_RIGHT);
+            int right = m.rawRead(0x81);
+            m.backPlayer(100.0 * AtariMachine.T_FRAME / (4.0 * AtariMachine.CPU_HZ)); // the same 100 frames back (x4 clock)
+            check(m.rawRead(0x81) == x0, "back to before the move");
+            m.forgetFuture();
+            for (int i = 0; i < 100; i++) m.runFrame(audio); // nothing held now
+            // (the frame it landed in keeps its recorded controls: at most one step)
+            check(right > x0 + 3 && m.rawRead(0x81) <= x0 + 1, "live controls after ⟲ (" + x0 + " " + right + " " + m.rawRead(0x81) + ")");
+        }
         m.forgetFuture();
         m.setPlayerRate(1.0 / AtariMachine.CPU_HZ);
         for (int i = 0; i < 400; i++) m.runFrame(audio);
