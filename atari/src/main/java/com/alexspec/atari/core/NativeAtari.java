@@ -37,6 +37,16 @@ public final class NativeAtari {
 
     public static native double historySeconds();
 
+    /** player's seconds per emulated cycle (ATARI-008): 1 / CPU_HZ at x1, a quarter at x4 */
+    public static native void setPlayerRate(double secondsPerCycle);
+
+    /** back {@code seconds} of the player's clock; returns the seconds actually gone back */
+    public static native double backPlayer(double seconds);
+
+    public static native double playerTime();
+
+    public static native double historyPlayerSeconds();
+
     public static native double fps();
 
     /**
@@ -55,8 +65,10 @@ public final class NativeAtari {
 
     public static native void traceCopy(long[] reads, long[] writes, long[] execs);
 
+    /** a save with the last minute of history, compressed ("ATS2") */
     public static native byte[] save();
 
+    /** a save with history or an older one without ("ATS1"); false if damaged or of another machine */
     public static native boolean load(byte[] state);
 
     private NativeAtari() {

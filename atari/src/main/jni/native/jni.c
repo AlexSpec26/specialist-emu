@@ -8,7 +8,7 @@
 #include "engine.h"
 
 #define JNI(name) Java_com_alexspec_atari_core_NativeAtari_##name
-#define MAX_STATE (8 * 1024 * 1024)
+#define MAX_STATE (64 * 1024 * 1024)
 
 JNIEXPORT jboolean JNICALL JNI(open)(JNIEnv *env, jclass cls, jstring dir, jstring path, jboolean basic) {
     (void)cls;
@@ -45,6 +45,10 @@ JNIEXPORT jboolean JNICALL JNI(backInstructions)(JNIEnv *env, jclass cls, jlong 
 JNIEXPORT jboolean JNICALL JNI(backTime)(JNIEnv *env, jclass cls, jlong t) { (void)env; (void)cls; return engine_back_time(t); }
 JNIEXPORT void JNICALL JNI(forgetFuture)(JNIEnv *env, jclass cls) { (void)env; (void)cls; engine_forget_future(); }
 JNIEXPORT jdouble JNICALL JNI(historySeconds)(JNIEnv *env, jclass cls) { (void)env; (void)cls; return engine_history_seconds(); }
+JNIEXPORT void JNICALL JNI(setPlayerRate)(JNIEnv *env, jclass cls, jdouble r) { (void)env; (void)cls; engine_set_player_rate(r); }
+JNIEXPORT jdouble JNICALL JNI(backPlayer)(JNIEnv *env, jclass cls, jdouble s) { (void)env; (void)cls; return engine_back_player(s); }
+JNIEXPORT jdouble JNICALL JNI(playerTime)(JNIEnv *env, jclass cls) { (void)env; (void)cls; return engine_player_time(); }
+JNIEXPORT jdouble JNICALL JNI(historyPlayerSeconds)(JNIEnv *env, jclass cls) { (void)env; (void)cls; return engine_history_player_seconds(); }
 JNIEXPORT jdouble JNICALL JNI(fps)(JNIEnv *env, jclass cls) { (void)env; (void)cls; return engine_fps(); }
 
 /* time, instructions, frames, last start, last pc, mid-frame, beam line, beam cycle, then A X Y S P PC */
@@ -94,14 +98,14 @@ JNIEXPORT void JNICALL JNI(traceCopy)(JNIEnv *env, jclass cls, jlongArray reads,
     (*env)->SetLongArrayRegion(env, execs, 0, 65536, (const jlong *)x);
 }
 
+/* a save with the last minute of history ("ATS2", ATARI-008) */
 JNIEXPORT jbyteArray JNICALL JNI(save)(JNIEnv *env, jclass cls) {
     (void)cls;
-    size_t size = engine_state_size();
-    if (!size || size > MAX_STATE) return NULL;
-    void *data = malloc(size);
+    size_t size;
+    void *data = engine_save_history(&size);
     if (!data) return NULL;
     jbyteArray result = NULL;
-    if (engine_save(data, size)) {
+    if (size <= MAX_STATE) {
         result = (*env)->NewByteArray(env, (jsize)size);
         if (result) (*env)->SetByteArrayRegion(env, result, 0, (jsize)size, data);
     }
@@ -112,7 +116,7 @@ JNIEXPORT jbyteArray JNICALL JNI(save)(JNIEnv *env, jclass cls) {
 JNIEXPORT jboolean JNICALL JNI(load)(JNIEnv *env, jclass cls, jbyteArray state) {
     (void)cls;
     jsize size = (*env)->GetArrayLength(env, state);
-    if (size < 16 || size > MAX_STATE) return 0;
+    if (size < 8 || size > MAX_STATE) return 0;
     jbyte *data = (*env)->GetByteArrayElements(env, state, 0);
     if (!data) return 0;
     int ok = engine_load(data, (size_t)size);

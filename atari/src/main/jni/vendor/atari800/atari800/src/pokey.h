@@ -64,6 +64,9 @@ void POKEY_PutByte(UWORD addr, UBYTE byte);
 int POKEY_Initialise(int *argc, char *argv[]);
 void POKEY_Frame(void);
 void POKEY_Scanline(void);
+/* AlexSpec: for snapshots (see pokey.c) */
+int POKEY_AlexGetPotScanline(void);
+void POKEY_AlexSetPotScanline(int v);
 void POKEY_StateSave(void);
 void POKEY_StateRead(void);
 

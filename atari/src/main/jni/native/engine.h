@@ -81,9 +81,26 @@ void engine_trace_arrays(const long long **reads, const long long **writes, cons
 /* The core's 64 KB memory array (RAM plus mapped ROM), or NULL. */
 uint8_t *engine_memory(void);
 
-/* Machine state at a frame boundary (a stop inside a frame saves the start of that frame).
- * Loading clears the history. */
+/* The player's clock (ATARI-008): the time the player lived through, whatever the speed. The app
+ * sets how many of its seconds one emulated cycle is (1 / ENGINE_CPU_HZ at x1, a quarter at x4). */
+void engine_set_player_rate(double seconds_per_cycle);
+double engine_player_time(void);
+/* Back `seconds` of the player's clock, exactly to that moment (an instruction boundary), with the
+ * recorded controls replayed from the snapshot before it. Returns the seconds actually gone back
+ * (less if the history is shorter, 0 without history). */
+double engine_back_player(double seconds);
+double engine_history_player_seconds(void);
+
+/* Machine state at a frame boundary (a stop inside a frame saves the start of that frame),
+ * without history ("ATS1"). */
 size_t engine_state_size(void);
+/* bytes the app's snapshots keep before the core's own state (what that leaves out; for tests) */
+size_t engine_snapshot_extra(void);
 int engine_save(void *data, size_t size);
+/* The same with the last minute of history (one snapshot per second and the controls), zlib
+ * compressed ("ATS2"); malloc'd, the caller frees it. NULL on failure. */
+void *engine_save_history(size_t *size);
+/* Loads either kind. After an "ATS2" save the history works as before saving; an "ATS1" one
+ * clears it. A damaged file or one of another machine is refused before the machine changes. */
 int engine_load(const void *data, size_t size);
 #endif

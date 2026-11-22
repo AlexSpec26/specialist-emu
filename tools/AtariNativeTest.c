@@ -10,6 +10,7 @@
  */
 #include "engine.h"
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -383,6 +384,185 @@ static void test_5200(void) {
     puts("ATARI 5200 CARTRIDGE + JOYSTICK + KEYPAD + STEPS OK");
 }
 
+/* plays `cycles` of emulated time with the scripted joystick, in slices like the app */
+static void play(long long cycles) {
+    long long end = engine_time() + cycles;
+    while (engine_time() < end) {
+        input(AKEY_NONE, script(engine_frames()));
+        long long left = end - engine_time();
+        engine_run(left < 20000 ? left : 20000, 0, audio, 16384);
+    }
+}
+
+typedef struct {
+    long long instr, time;
+    unsigned long ram;
+    int regs[6];
+    double player;
+} Mark;
+
+static Mark mark(void) {
+    Mark m;
+    m.instr = engine_instructions();
+    m.time = engine_time();
+    m.ram = hash_ram();
+    engine_regs(m.regs);
+    m.player = engine_player_time();
+    return m;
+}
+
+static int same(Mark a, Mark b) {
+    return a.instr == b.instr && a.time == b.time && a.ram == b.ram && memcmp(a.regs, b.regs, sizeof a.regs) == 0;
+}
+
+/* ATARI-008: back 5 s of the player's clock, exactly, at any speed; saves keep the history. */
+static void test_player_rewind(const char *demo) {
+    const double x1 = 1.0 / ENGINE_CPU_HZ;
+    assert(engine_open(DIR, demo, 0));
+    engine_set_player_rate(x1);
+    play(8LL * ENGINE_CPU_HZ + 12345);        /* 8 s, then stop inside a frame */
+    assert(engine_mid_frame());
+
+    /* x1: 5 s of play, back 5 s = the same machine as 5 s ago (to the cycle) */
+    /* (play stops at the first instruction at or after its end, a few cycles later: going back
+       by what the clock shows lands exactly on the mark) */
+    Mark m = mark();
+    play(5LL * ENGINE_CPU_HZ);
+    double went = engine_back_player(engine_player_time() - m.player);
+    assert(went > 4.9999 && went < 5.0001);
+    assert(same(m, mark()));
+
+    /* x4: 20 s of the game are 5 s of the player's */
+    engine_forget_future();
+    engine_set_player_rate(x1 / 4);
+    m = mark();
+    play(20LL * ENGINE_CPU_HZ);
+    engine_set_player_rate(x1);
+    went = engine_back_player(engine_player_time() - m.player);
+    assert(went > 4.9999 && went < 5.0001 && same(m, mark()));
+
+    /* slow motion 1/8: 0.625 s of the game */
+    engine_forget_future();
+    engine_set_player_rate(x1 * 8);
+    m = mark();
+    play(ENGINE_CPU_HZ * 5LL / 8);
+    went = engine_back_player(engine_player_time() - m.player);
+    assert(went > 4.9999 && went < 5.0001 && same(m, mark()));
+
+    /* three times in a row, the clock and the game time go back 15 s */
+    engine_forget_future();
+    engine_set_player_rate(x1);
+    play(30LL * ENGINE_CPU_HZ);
+    m = mark();
+    for (int i = 0; i < 3; i++) {
+        went = engine_back_player(5);
+        assert(went > 4.9999 && went < 5.0001);
+    }
+    assert(m.time - engine_time() >= 15LL * ENGINE_CPU_HZ - 200 && m.time - engine_time() <= 15LL * ENGINE_CPU_HZ);
+    assert(fabs(m.player - engine_player_time() - 15) < 2e-5); /* each lands on the next instruction start */
+    /* going forward again replays the recording: the same machine as before */
+    engine_forward(m.time - engine_time());
+    assert(same(m, mark()));
+
+    /* not further than the history */
+    engine_forget_future();
+    play(70LL * ENGINE_CPU_HZ);
+    double hist = engine_history_player_seconds();
+    assert(hist > 60 && hist < 63.5);
+    went = engine_back_player(1000);
+    assert(went > 60 && went < 63.5);
+    assert(engine_back_player(5) == 0 || engine_history_player_seconds() < 0.6);
+
+    /* a save keeps the last minute: loaded into a new machine, back 5 s gives the same as here */
+    engine_forget_future();
+    play(70LL * ENGINE_CPU_HZ + 777);
+    assert(engine_mid_frame());
+    size_t n;
+    unsigned char *state = engine_save_history(&n);
+    assert(state && n > 1000);
+    printf("  save with %.1f s of history: %zu KB\n", engine_history_player_seconds(), n / 1024);
+    assert(n < 8u << 20);
+    Mark at_save = mark();
+    went = engine_back_player(5);
+    Mark back_here = mark();
+    engine_forget_future();
+    play(3LL * ENGINE_CPU_HZ);
+    Mark on_here = mark();
+
+    assert(engine_open(DIR, demo, 0));
+    engine_set_player_rate(x1);
+    play(ENGINE_CPU_HZ);
+    unsigned long other = hash_ram();
+    /* damaged files are refused and leave the machine alone */
+    assert(!engine_load(state, n - 100));
+    state[n / 2] ^= 0x55;
+    assert(!engine_load(state, n));
+    state[n / 2] ^= 0x55;
+    assert(hash_ram() == other);
+
+    assert(engine_load(state, n));
+    assert(!engine_mid_frame());
+    /* a save inside a frame stores the start of that frame */
+    assert(engine_time() <= at_save.time && engine_time() > at_save.time - engine_frame_cycles());
+    assert(fabs(engine_player_time() - at_save.player) < 0.03);
+    assert(engine_history_player_seconds() > 58);
+    /* back 5 s from the loaded point, in this machine and in a freshly opened one: the same;
+       and playing on from there (the same controls) gives the same game twice. A fresh open
+       followed by a load once went its own way here: the XEX loader's state was not in the
+       snapshot (now it is, binload.c in THIRD_PARTY.md). */
+    Mark loaded = mark();
+    assert(engine_back_player(5) > 4.9999);
+    Mark back_loaded = mark();
+    /* compare with the original machine doing the same from the same point */
+    assert(engine_open(DIR, demo, 0));
+    assert(engine_load(state, n));
+    assert(same(loaded, mark()));
+    assert(engine_back_player(5) > 4.9999 && same(back_loaded, mark()));
+    engine_forget_future();
+    play(3LL * ENGINE_CPU_HZ);
+    Mark on_loaded = mark();
+    assert(engine_load(state, n) && engine_back_player(5) > 4.9999);
+    assert(same(back_loaded, mark()));
+    engine_forget_future();
+    play(3LL * ENGINE_CPU_HZ);
+    assert(same(on_loaded, mark()));
+    (void)back_here; (void)on_here; (void)went;
+
+    /* steps back work after loading too */
+    assert(engine_load(state, n));
+    long long i0 = engine_instructions();
+    assert(engine_back_instructions(1) && engine_instructions() == i0 - 1);
+    assert(engine_back_time(30LL * ENGINE_CPU_HZ));
+
+    /* an old save without history still loads ("ATS1"), also one from before ATARI-008 that
+       has no XEX-loader state (8 ints less before the core's state) */
+    size_t n1 = engine_state_size();
+    unsigned char *old = malloc(n1);
+    assert(old && engine_save(old, n1));
+    unsigned long h1 = hash_ram();
+    play(ENGINE_CPU_HZ);
+    assert(engine_load(old, n1) && engine_history_player_seconds() == 0 && hash_ram() == h1);
+    size_t legacy = n1 - (engine_snapshot_extra() - 8 * sizeof(int));
+    memmove(old + 4 + 8 * sizeof(int), old + 4 + engine_snapshot_extra(), n1 - 4 - engine_snapshot_extra());
+    play(ENGINE_CPU_HZ);
+    assert(engine_load(old, legacy) && hash_ram() == h1);
+    assert(!engine_load(old, legacy + 4));
+    free(old);
+
+    /* going back to the moment the program was still loading (the XEX loader in the middle of
+       the file) and playing on gives the same machine as the first time */
+    assert(engine_open(DIR, demo, 0));
+    play(6LL * ENGINE_CPU_HZ);
+    m = mark();
+    for (int k = 1; k <= 6; k++) { /* 0.25 s … 1.5 s after the start */
+        engine_back_time(engine_time() - k * ENGINE_CPU_HZ / 4);
+        engine_forward(m.time - engine_time());
+        assert(same(m, mark()));
+    }
+    free(state);
+    puts("PLAYER CLOCK: BACK 5 S AT x1, x4, 1/8, 3 TIMES, NOT FURTHER THAN HISTORY; SAVE WITH HISTORY OK");
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2);
     mkdir(DIR, 0700);
@@ -393,6 +573,7 @@ int main(int argc, char **argv) {
     test_slow_motion_is_exact("", 1, 1);
     test_steps(argv[1]);
     test_save_load(argv[1]);
+    test_player_rewind(argv[1]);
     test_media();
     test_5200();
     puts("ATARI ENGINE OK");

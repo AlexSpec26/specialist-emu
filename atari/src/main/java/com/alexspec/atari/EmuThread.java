@@ -217,6 +217,10 @@ final class EmuThread extends Thread {
             }
 
             double sp = Math.max(1.0 / AtariMachine.CPU_HZ, Math.min(4, speed));
+            // the player's clock (⟲ 5 s, ATARI-008): one real slice of 1/FPS s is spread over
+            // what runs in it — x4: 4 frames, slow motion: a part of one
+            double perReal = sp > 1 ? Math.round(sp) : sp;
+            machine.setPlayerRate(1.0 / (AtariMachine.CPU_HZ * perReal));
             if (sp > 1) {
                 // x2 / x4: several frames per real slice
                 int n = (int) Math.round(sp);

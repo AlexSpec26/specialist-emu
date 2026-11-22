@@ -22,4 +22,7 @@ void timeline_reset(void);
 void timeline_free(void);
 const void *timeline_mid_frame_snapshot(void);
 void timeline_leave_frame(void);
+/* saves with history: the uncompressed payload (malloc'd) and loading it back */
+void *timeline_save_payload(size_t *len);
+int timeline_load_payload(const void *data, size_t len);
 #endif

@@ -134,6 +134,23 @@ void ESC_Remove(UBYTE esc_code)
 	esc_function[esc_code] = NULL;
 }
 
+/* AlexSpec (atari/THIRD_PARTY.md): one entry of the table without touching memory, for the
+   app's snapshots (the ESC bytes themselves are in memory, which snapshots already restore). */
+int ESC_AlexGet(UBYTE esc_code)
+{
+	return esc_function[esc_code] ? esc_address[esc_code] : -1;
+}
+
+void ESC_AlexSet(UBYTE esc_code, int address, ESC_FunctionType function)
+{
+	if (address < 0) {
+		esc_function[esc_code] = NULL;
+		return;
+	}
+	esc_address[esc_code] = (UWORD) address;
+	esc_function[esc_code] = function;
+}
+
 void ESC_Run(UBYTE esc_code)
 {
 	if (esc_address[esc_code] == CPU_regPC - 2 && esc_function[esc_code] != NULL) {

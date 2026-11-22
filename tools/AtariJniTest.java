@@ -2,7 +2,7 @@ package com.alexspec.atari.core;
 
 /**
  * Desktop test of the JNI bridge (src/main/jni/native/jni.c), the same code as in the APK:
- * opening, running, stepping back and forth, the trace, save/load.
+ * opening, running, stepping back and forth, the trace, save/load, ⟲ 5 s of the player's clock.
  *   JAVA_HOME=... make -s -f atari/src/main/jni/Makefile.host jni-test DEMO=atari/src/main/assets/demos/catch-the-star.xex
  */
 public final class AtariJniTest {
@@ -69,6 +69,27 @@ public final class AtariJniTest {
         check(m.time() > t2 && m.backInstructions(1) && m.time() == t2, "AtariMachine steps");
         m.syncTrace();
         check(m.trace.lastExec[m.pc()] > 0 || m.trace.lastExec[m.lastInstrPc()] > 0, "AtariMachine trace");
+
+        // ⟲ 5 s (ATARI-008): at x4 the player's 5 s are 20 s of the machine; a save keeps them
+        check(m.open("/tmp/atari-native-system", args[0], false), "AtariMachine open demo");
+        m.setPlayerRate(1.0 / (4.0 * AtariMachine.CPU_HZ));
+        for (int i = 0; i < 1200; i++) m.runFrame(audio); // 24 s of the machine = 6 s of the player
+        long tx4 = m.time();
+        double went = m.backPlayer(5);
+        check(Math.abs(went - 5) < 1e-3, "back 5 s at x4 (" + went + ")");
+        long gone = tx4 - m.time();
+        check(Math.abs(gone - 20L * AtariMachine.CPU_HZ) < 200, "x4: 20 s of the machine (" + gone + ")");
+        m.forgetFuture();
+        m.setPlayerRate(1.0 / AtariMachine.CPU_HZ);
+        for (int i = 0; i < 400; i++) m.runFrame(audio);
+        byte[] saved = m.saveState();
+        check(saved != null && saved.length > 1000, "save with history");
+        long at = m.time();
+        check(m.open("/tmp/atari-native-system", args[0], false) && m.loadState(saved), "load with history");
+        check(m.time() == at && m.historyPlayerSeconds() > 8, "history after load (" + m.historyPlayerSeconds() + ")");
+        check(Math.abs(m.backPlayer(5) - 5) < 1e-3, "back 5 s after load");
+        byte[] cut = java.util.Arrays.copyOf(saved, saved.length / 2);
+        check(!m.loadState(cut), "a cut save is refused");
         NativeAtari.close();
 
         // Atari 2600 images are recognised before opening; Atari 8-bit and 5200 ones are not flagged
