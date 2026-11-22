@@ -179,13 +179,13 @@ final class EmuThread extends Thread {
             machine.setHistoryEnabled(machine.tapeInput == null);
             // ×2 / ×4 run two / four frames' worth per real frame (their sound squeezed into it);
             // slow speeds run a part of a frame, below 4 clocks per frame not every frame
-            com.alexspec.specialist.core.Explorer b = bot;
-            if (b != null) {
+            com.alexspec.specialist.core.Explorer player = bot;
+            if (player != null) {
                 try {
-                    b.beforeFrame(machine);
+                    player.beforeFrame(machine);
                 } catch (Exception | Error e) {
                     android.util.Log.e("Specialist", "bot failed", e);
-                    b.stop(machine);
+                    player.stop(machine);
                     bot = null;
                 }
             }
