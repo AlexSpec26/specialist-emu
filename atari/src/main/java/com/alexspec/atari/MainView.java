@@ -798,6 +798,30 @@ final class MainView extends View {
         return AtariKeys.shortLabel(code);
     }
 
+    /**
+     * Keys are parallelograms, as the caps of the XE look from above (ATARI-010, owner: "клавиши
+     * такие... параллелограммами, как на оригинале"): the top edge is shifted by KEY_SLANT of the
+     * key's height. Positive = the top leans right. Touch areas stay the rectangles.
+     */
+    private static final float KEY_SLANT = 0.22f;
+    private final android.graphics.Path keyPath = new android.graphics.Path();
+    private android.graphics.CornerPathEffect keyCorners;
+
+    private void drawKeyCap(Canvas c, RectF r, float rad) {
+        float sh = Math.min(r.height() * KEY_SLANT, r.width() * 0.3f);
+        float a = sh > 0 ? sh : 0, b = sh < 0 ? -sh : 0;
+        keyPath.reset();
+        keyPath.moveTo(r.left + a, r.top);
+        keyPath.lineTo(r.right - b, r.top);
+        keyPath.lineTo(r.right - a, r.bottom);
+        keyPath.lineTo(r.left + b, r.bottom);
+        keyPath.close();
+        if (keyCorners == null) keyCorners = new android.graphics.CornerPathEffect(rad);
+        fill.setPathEffect(keyCorners);
+        c.drawPath(keyPath, fill);
+        fill.setPathEffect(null);
+    }
+
     private void drawKeyboard(Canvas c) {
         fill.setColor(landscape ? 0xE6101014 : 0xFF101014);
         c.drawRect(kbdRect, fill);
@@ -821,19 +845,22 @@ final class MainView extends View {
                         || k.code == AtariMachine.CAPS || k.code == AtariMachine.TAB) bg = 0xFF3A3A48;
                 else bg = 0xFF26262C;
                 fill.setColor(bg);
-                c.drawRoundRect(k.r, rad, rad, fill);
+                drawKeyCap(c, k.r, rad);
                 String main = AtariKeys.label(k.code);
                 String sh = AtariKeys.shifted(k.code);
                 String ct = AtariKeys.control(k.code);
                 boolean single = main.length() == 1;
                 float kh = k.r.height(), kwd = k.r.width();
+                // the labels follow the slant: at a height y the cap spans from left + slant * (1 - y/h)
+                float slant = Math.min(kh * KEY_SLANT, kwd * 0.3f);
+                kwd -= Math.abs(slant);
                 text.setColor(Color.WHITE);
                 float ts = single ? Math.min(kh * 0.42f, 20 * dp) : Math.min(kh * 0.26f, 12 * dp);
                 text.setTextSize(ts);
                 float tw = text.measureText(main);
                 if (tw > kwd * 0.9f) text.setTextSize(ts * kwd * 0.9f / tw);
                 text.setTextAlign(single ? Paint.Align.LEFT : Paint.Align.CENTER);
-                float mx = single ? k.r.left + 3 * dp : k.r.centerX();
+                float mx = single ? k.r.left + slant * 0.5f + 3 * dp : k.r.centerX();
                 float my = single ? k.r.top + kh * 0.5f : k.r.centerY() + text.getTextSize() * 0.36f;
                 c.drawText(main, mx, my, text);
                 // SHIFT symbol: upper right, red like ZX's symbols
@@ -844,7 +871,7 @@ final class MainView extends View {
                     text.setTextSize(ss);
                     float sw = text.measureText(sh);
                     if (sw > kwd * 0.55f) text.setTextSize(ss * kwd * 0.55f / sw);
-                    c.drawText(sh, k.r.right - 2.5f * dp, k.r.top + kh * 0.36f, text);
+                    c.drawText(sh, k.r.right - slant * 0.36f - 2.5f * dp, k.r.top + kh * 0.36f, text);
                 }
                 // CONTROL function (cursor keys): along the bottom, blue
                 if (!ct.isEmpty()) {
@@ -852,7 +879,7 @@ final class MainView extends View {
                     text.setColor(0xFF8FB8FF);
                     float ls = Math.min(kh * 0.24f, 11 * dp);
                     text.setTextSize(ls);
-                    c.drawText(ct, k.r.centerX(), k.r.bottom - 3 * dp, text);
+                    c.drawText(ct, k.r.centerX() - slant * 0.4f, k.r.bottom - 3 * dp, text);
                 }
                 text.setTextAlign(Paint.Align.CENTER);
             }
