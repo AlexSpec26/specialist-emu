@@ -125,8 +125,8 @@ final class MainView extends View {
     private final RectF joyZone = new RectF();
     private final RectF btnZone = new RectF();
     private float toolbarY = -1, toolbarH;
-    /** the stick: at rest its ring stands at joyRestX/Y; a touch in its zone puts the centre
-     *  (joyCx/Cy) under the finger, as in DOS 286 and the Specialist (Dysmantle-style) */
+    /** the stick: fixed at joyRestX/Y (ATARI-009; it floated under the finger in ATARI-008, which
+     *  the owner found awkward to start moving); joyCx/Cy is the same point */
     private float joyCx, joyCy, joyR, joyRestX, joyRestY;
     private final float[] btnX = new float[ControlConfig.MAX_BUTTONS];
     private final float[] btnY = new float[ControlConfig.MAX_BUTTONS];
@@ -1010,8 +1010,10 @@ final class MainView extends View {
                 return;
             }
             joyPointer = id;
-            joyCx = x; // the centre where the finger came down
-            joyCy = y;
+            // a fixed stick (ATARI-009, owner: "джойстик надо-таки обычный, без плавающего начала"):
+            // the centre stays where it is drawn, the first touch already gives the direction
+            joyCx = joyRestX;
+            joyCy = joyRestY;
             updateJoy(x, y);
             return;
         }
@@ -1147,14 +1149,6 @@ final class MainView extends View {
     private void updateJoy(float x, float y) {
         float dx = x - joyCx, dy = y - joyCy;
         float dist = (float) Math.sqrt(dx * dx + dy * dy);
-        if (dist > joyR) {
-            // the finger went past the ring: the centre follows it (turning needs no return)
-            joyCx = x - dx * joyR / dist;
-            joyCy = y - dy * joyR / dist;
-            dx = x - joyCx;
-            dy = y - joyCy;
-            dist = joyR;
-        }
         float lim = joyR * 0.62f;
         if (dist > lim) {
             knobX = joyCx + dx / dist * lim;

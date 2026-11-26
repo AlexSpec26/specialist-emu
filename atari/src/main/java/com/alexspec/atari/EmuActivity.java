@@ -380,7 +380,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
         screenRenderer.mode = mode;
         if (glView != null) glView.requestRender();
         emu.sound = prefs.getBoolean("sound", true);
-        int step = Math.max(0, Math.min(Speed.STEPS - 1, prefs.getInt("speedStep", Speed.REAL)));
+        int step = speedStep();
         emu.speed = Speed.factor(step);
         view.speedBadge = Speed.badge(step);
         // memory visualisation
@@ -512,7 +512,7 @@ public final class EmuActivity extends Activity implements MainView.Host {
         actions.add(this::exportState);
         items.add("📦  Импорт сохранения…");
         actions.add(this::importState);
-        items.add("⏱  Скорость: " + Speed.describe(prefs.getInt("speedStep", Speed.REAL)) + "…");
+        items.add("⏱  Скорость: " + Speed.describe(speedStep()) + "…");
         actions.add(this::showSpeed);
         items.add("🔬  Визуализация памяти…");
         actions.add(this::showVisualization);
@@ -560,11 +560,12 @@ public final class EmuActivity extends Activity implements MainView.Host {
         label.setTextSize(18);
         label.setGravity(android.view.Gravity.CENTER);
         android.widget.TextView hint = new android.widget.TextView(this);
-        hint.setText("Каждый шаг — вдвое. Вправо — медленнее, до 1 такта в секунду: видно, как луч рисует "
-                + "кадр и как работает каждая команда. В паузе — шаги по одной команде и по секунде.");
+        hint.setText("Для игры — мелкие шаги до 1/16: 3/4, 2/3, 1/2, 1/3 … Дальше вправо — каждый шаг вдвое, "
+                + "до 1 такта в секунду: видно, как луч рисует кадр и как работает каждая команда. "
+                + "В паузе — шаги по одной команде и по секунде.");
         android.widget.SeekBar bar = new android.widget.SeekBar(this);
         bar.setMax(Speed.STEPS - 1);
-        int cur = prefs.getInt("speedStep", Speed.REAL);
+        int cur = speedStep();
         bar.setProgress(cur);
         Runnable upd = () -> label.setText(Speed.describe(bar.getProgress()));
         upd.run();
@@ -589,14 +590,32 @@ public final class EmuActivity extends Activity implements MainView.Host {
                 .setTitle("Скорость")
                 .setView(box)
                 .setPositiveButton("OK", (dlg, w) -> {
-                    prefs.edit().putInt("speedStep", bar.getProgress()).apply();
+                    prefs.edit().putInt("speedStep2", bar.getProgress()).apply();
                     applySettings();
                 })
                 .setNeutralButton("Реальная", (dlg, w) -> {
-                    prefs.edit().putInt("speedStep", Speed.REAL).apply();
+                    prefs.edit().putInt("speedStep2", Speed.REAL).apply();
                     applySettings();
                 })
                 .setNegativeButton("Отмена", null));
+    }
+
+    /**
+     * The speed step. ATARI-009 changed the steps (fine ones down to 1/16), so the setting has a new
+     * key; an old one ("speedStep", each step half the speed) is taken to the nearest new step.
+     */
+    private int speedStep() {
+        int s = prefs.getInt("speedStep2", -1);
+        if (s < 0) {
+            s = Speed.REAL;
+            if (prefs.contains("speedStep")) {
+                int old = prefs.getInt("speedStep", 2);
+                double f = old >= 23 ? 1.0 / com.alexspec.atari.core.AtariMachine.CPU_HZ : Math.pow(2, 2 - old);
+                s = Speed.nearest(f);
+            }
+            prefs.edit().putInt("speedStep2", s).apply();
+        }
+        return Math.max(0, Math.min(Speed.STEPS - 1, s));
     }
 
     private static final String[] COLOR_NAMES = {"зелёный", "красный", "малиновый", "жёлтый", "голубой", "синий",
