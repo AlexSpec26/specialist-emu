@@ -1,10 +1,10 @@
 # Current handoff
-- Updated at (UTC): 2026-11-22
+- Updated at (UTC): 2026-11-26
 - Outgoing agent: Claude «Майнер» (Claude Code, облачная сессия; отвечает только за Atari — `atari/`, `tools/Atari*`)
-- Branch: `claude/atari-standard`
+- Branch: `claude/atari-speed-stick` (ATARI-009)
 - Last pushed commit: см. `git log -1 origin/claude/atari-standard`
-- Open PR: ATARI-BUG-002 (ветка `claude/atari-rewind-live`); PR #28 (ATARI-008) влит, релиз atari-build-26
-- Active backlog IDs: ATARI-BUG-002, ATARI-008 (Review)
+- Open PR: ATARI-009 (дробная скорость, обычный джойстик); влиты #28 (ATARI-008) и #29 (ATARI-BUG-002), релиз atari-build-28
+- Active backlog IDs: ATARI-009 (Review), ATARI-008 (Review)
 - User-approved goal for this session: «В этой ветке мы сфокусируемся на эмуляторе Atari, ты будешь отвечать за
   него … остальные ветки рассматриваем только для заимствования элементов интерфейса». Задача: «Atari надо
   привести к "общему стандарту" - чтобы перемотка назад на 5 секунд РЕАЛЬНОГО времени, нормальный джойстик,
@@ -43,7 +43,7 @@
 - Если видеочип не поднялся (шейдер не собрался) — картинка рисуется по-старому, без режимов и лупы.
 
 ## Exact next steps (ordered)
-1. Сделано: PR #28 влит, atari-build-26. Слить PR ATARI-BUG-002 (с согласия владельца) → следующий atari-build.
+1. Сделано: #28 и #29 влиты, atari-build-28 («играбельно!»). Слить PR ATARI-009 (с согласия владельца — слияние в main только после его «сливай») → следующий atari-build.
 2. Владелец: ⟲ 5 с при ×1, ×4 и замедлении; сохранить → выйти → загрузить → ⟲; экран (цветной ТВ, лупа);
    джойстик и кнопки 5–8; River Raid и любимые игры.
 3. По отзывам — правки ATARI-008.
